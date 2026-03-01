@@ -1,0 +1,100 @@
+# Smart Choice - lokalne uruchomienie DEV
+
+Ta instrukcja uruchamia lokalnie cały stack na istniejących projektach:
+- backend `.NET 10` z endpointami healthcheck i CORS
+- frontend `Ionic`
+- `MySQL 8` w Docker Compose
+- opcjonalnie `MinIO` w Docker Compose
+
+## 1) Wymagane zmienne środowiskowe
+
+### Backend (`api/SmartChoice`)
+Minimalny zestaw:
+
+```bash
+ASPNETCORE_ENVIRONMENT=Development
+ASPNETCORE_URLS=http://localhost:5148
+ConnectionStrings__Default=Server=localhost;Port=3306;Database=smart_choice;User=smart_choice;Password=smart_choice_dev;
+SMARTCHOICE_CORS_ORIGINS=http://localhost:8100,http://127.0.0.1:8100,http://localhost,capacitor://localhost
+```
+
+Gotowiec: `api/SmartChoice/.env.example`
+
+### Mobile / Ionic (`apk/smart-choice`)
+Minimalny zestaw:
+
+```bash
+IONIC_API_BASE_URL=http://localhost:5148
+```
+
+Gotowiec: `apk/smart-choice/.env.example`
+
+Uwaga dla emulatora Android: ustaw `IONIC_API_BASE_URL=http://10.0.2.2:5148`.
+
+## 2) Docker Compose (MySQL 8 + opcjonalny MinIO)
+
+Plik: `docker-compose.dev.yml`
+
+- MySQL 8 jest uruchamiany zawsze (`localhost:3306`)
+- MinIO jest opcjonalne przez profil `minio` (`localhost:9000`, panel `localhost:9001`)
+
+## 3) Krok po kroku: jak odpalić wszystko lokalnie
+
+Z katalogu repo:
+
+```bash
+# 1. Uruchom bazę (MySQL)
+docker compose -f docker-compose.dev.yml up -d mysql
+
+# 1a. (opcjonalnie) uruchom też MinIO
+docker compose -f docker-compose.dev.yml --profile minio up -d minio
+```
+
+Uruchom backend:
+
+```bash
+cd api/SmartChoice
+
+# Linux/macOS
+export ASPNETCORE_ENVIRONMENT=Development
+export ASPNETCORE_URLS=http://localhost:5148
+export ConnectionStrings__Default='Server=localhost;Port=3306;Database=smart_choice;User=smart_choice;Password=smart_choice_dev;'
+export SMARTCHOICE_CORS_ORIGINS='http://localhost:8100,http://127.0.0.1:8100,http://localhost,capacitor://localhost'
+
+dotnet run --project SmartChoice/SmartChoice.csproj
+```
+
+Sprawdź healthcheck backendu:
+
+```bash
+curl http://localhost:5148/health/live
+curl http://localhost:5148/health/ready
+```
+
+Uruchom Ionic:
+
+```bash
+cd apk/smart-choice
+
+# Linux/macOS
+export IONIC_API_BASE_URL=http://localhost:5148
+
+npm start
+```
+
+Frontend wystartuje na `http://localhost:8100`.
+
+## 4) CORS i base URL - gdzie jest skonfigurowane
+
+- Backend CORS:
+  - `api/SmartChoice/SmartChoice/Program.cs` - polityka `SmartChoiceDevCors`
+  - źródła są brane z `SMARTCHOICE_CORS_ORIGINS` (CSV), fallback: `Cors:AllowedOrigins` w `appsettings.Development.json`
+
+- Backend healthcheck:
+  - `GET /health/live` - liveness
+  - `GET /health/ready` - readiness (sprawdza m.in. czy jest ustawiony `ConnectionStrings:Default`)
+  - `GET /health` - redirect do `/health/ready`
+
+- Ionic base URL:
+  - `apk/smart-choice/scripts/write-runtime-env.mjs` generuje `src/assets/env.js` na podstawie `IONIC_API_BASE_URL`
+  - `src/environments/environment.ts` i `environment.prod.ts` czytają `window.__env.API_BASE_URL`
