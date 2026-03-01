@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
+using SmartChoice.Api.Auth;
 using SmartChoice.Domain.Entities;
 using SmartChoice.Domain.Enums;
 
 namespace SmartChoice.Data.Seeding;
 
-public sealed class DevDataSeeder(SmartChoiceDbContext dbContext, ILogger<DevDataSeeder> logger)
+public sealed class DevDataSeeder(
+    SmartChoiceDbContext dbContext,
+    ILogger<DevDataSeeder> logger,
+    PasswordHashingService passwordHashingService)
 {
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
@@ -16,8 +20,8 @@ public sealed class DevDataSeeder(SmartChoiceDbContext dbContext, ILogger<DevDat
 
         var now = DateTime.UtcNow;
 
-        var userA = new User("alice", "alice@smartchoice.local", "dev_hash_alice");
-        var userB = new User("bob", "bob@smartchoice.local", "dev_hash_bob");
+        var userA = new User("alice", "alice@smartchoice.local", passwordHashingService.HashPassword("Alice123!"));
+        var userB = new User("bob", "bob@smartchoice.local", passwordHashingService.HashPassword("Bob123!"));
 
         dbContext.Users.AddRange(userA, userB);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -26,7 +30,7 @@ public sealed class DevDataSeeder(SmartChoiceDbContext dbContext, ILogger<DevDat
         dbContext.Invites.Add(invite);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var guestToken = new GuestToken("dev_guest_token_hash_001", invite.Id, now.AddDays(7));
+        var guestToken = new GuestToken(TokenSecurity.Sha256("dev_guest_seed_jti"), invite.Id, now.AddDays(7));
         dbContext.GuestTokens.Add(guestToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 

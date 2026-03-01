@@ -6,10 +6,6 @@ namespace SmartChoice.Api.Contracts;
 public sealed class CreatePollRequest : IValidatableObject
 {
     [Required]
-    [Range(1, long.MaxValue)]
-    public long AuthorUserId { get; init; }
-
-    [Required]
     [StringLength(280, MinimumLength = 3)]
     public string Question { get; init; } = string.Empty;
 

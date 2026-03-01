@@ -16,6 +16,9 @@ ASPNETCORE_ENVIRONMENT=Development
 ASPNETCORE_URLS=http://localhost:5148
 ConnectionStrings__Default=Server=localhost;Port=3306;Database=smart_choice;User=smart_choice;Password=smart_choice_dev;
 SMARTCHOICE_CORS_ORIGINS=http://localhost:8100,http://127.0.0.1:8100,http://localhost,capacitor://localhost
+Auth__Issuer=smart-choice-api
+Auth__Audience=smart-choice-client
+Auth__SigningKey=dev_only_change_me_to_a_long_32_char_secret_key
 ```
 
 Gotowiec: `api/SmartChoice/.env.example`
@@ -60,6 +63,9 @@ export ASPNETCORE_ENVIRONMENT=Development
 export ASPNETCORE_URLS=http://localhost:5148
 export ConnectionStrings__Default='Server=localhost;Port=3306;Database=smart_choice;User=smart_choice;Password=smart_choice_dev;'
 export SMARTCHOICE_CORS_ORIGINS='http://localhost:8100,http://127.0.0.1:8100,http://localhost,capacitor://localhost'
+export Auth__Issuer='smart-choice-api'
+export Auth__Audience='smart-choice-client'
+export Auth__SigningKey='dev_only_change_me_to_a_long_32_char_secret_key'
 export Database__AutoMigrateOnStartup=true
 export Database__SeedDevDataOnStartup=true
 
