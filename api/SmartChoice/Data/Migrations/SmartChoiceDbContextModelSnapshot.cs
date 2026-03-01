@@ -157,11 +157,23 @@ namespace SmartChoice.Data.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("ends_at");
 
+                    b.Property<double>("Latitude")
+                        .HasColumnType("double")
+                        .HasColumnName("latitude");
+
+                    b.Property<double>("Longitude")
+                        .HasColumnType("double")
+                        .HasColumnName("longitude");
+
                     b.Property<string>("Question")
                         .IsRequired()
                         .HasMaxLength(280)
                         .HasColumnType("varchar(280)")
                         .HasColumnName("question");
+
+                    b.Property<int>("RadiusMeters")
+                        .HasColumnType("int")
+                        .HasColumnName("radius_meters");
 
                     b.Property<DateTime?>("StartsAt")
                         .HasColumnType("datetime(6)")
@@ -185,12 +197,21 @@ namespace SmartChoice.Data.Migrations
                     b.HasIndex("EndsAt", "Status")
                         .HasDatabaseName("ix_polls_ends_at_status");
 
+                    b.HasIndex("Latitude", "Longitude")
+                        .HasDatabaseName("ix_polls_lat_lng");
+
                     b.HasIndex("Status", "CreatedAt")
                         .HasDatabaseName("ix_polls_status_created_at");
 
                     b.ToTable("polls", null, t =>
                         {
                             t.HasCheckConstraint("ck_polls_dates", "`ends_at` IS NULL OR `starts_at` IS NULL OR `ends_at` > `starts_at`");
+
+                            t.HasCheckConstraint("ck_polls_latitude", "`latitude` >= -90 AND `latitude` <= 90");
+
+                            t.HasCheckConstraint("ck_polls_longitude", "`longitude` >= -180 AND `longitude` <= 180");
+
+                            t.HasCheckConstraint("ck_polls_radius_meters", "`radius_meters` >= 1");
                         });
                 });
 
@@ -205,9 +226,22 @@ namespace SmartChoice.Data.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(128)
+                        .HasColumnType("varchar(128)")
+                        .HasColumnName("content_type");
+
                     b.Property<byte>("DisplayOrder")
                         .HasColumnType("tinyint unsigned")
                         .HasColumnName("display_order");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("file_size_bytes");
+
+                    b.Property<int?>("Height")
+                        .HasColumnType("int")
+                        .HasColumnName("height");
 
                     b.Property<string>("PhotoUrl")
                         .IsRequired()
@@ -219,6 +253,33 @@ namespace SmartChoice.Data.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("poll_id");
 
+                    b.Property<string>("StorageKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("varchar(512)")
+                        .HasColumnName("storage_key");
+
+                    b.Property<int?>("ThumbnailHeight")
+                        .HasColumnType("int")
+                        .HasColumnName("thumbnail_height");
+
+                    b.Property<string>("ThumbnailStorageKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("varchar(512)")
+                        .HasColumnName("thumbnail_storage_key");
+
+                    b.Property<string>("ThumbnailUrl")
+                        .HasMaxLength(1024)
+                        .HasColumnType("varchar(1024)")
+                        .HasColumnName("thumbnail_url");
+
+                    b.Property<int?>("ThumbnailWidth")
+                        .HasColumnType("int")
+                        .HasColumnName("thumbnail_width");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("int")
+                        .HasColumnName("width");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PollId")
@@ -227,6 +288,10 @@ namespace SmartChoice.Data.Migrations
                     b.HasIndex("PollId", "DisplayOrder")
                         .IsUnique()
                         .HasDatabaseName("ux_poll_photos_poll_order");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_poll_photos_storage_key");
 
                     b.ToTable("poll_photos", null, t =>
                         {

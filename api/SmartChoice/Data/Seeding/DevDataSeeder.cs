@@ -34,7 +34,7 @@ public sealed class DevDataSeeder(
         dbContext.GuestTokens.Add(guestToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var poll = Poll.Create(
+        var poll = Poll.CreateDraft(
             userA.Id,
             "Które zdjęcie powinno wygrać?",
             [
@@ -42,8 +42,12 @@ public sealed class DevDataSeeder(
                 "https://picsum.photos/id/20/800/600",
                 "https://picsum.photos/id/30/800/600"
             ],
+            52.2297,
+            21.0122,
+            5_000,
             now.AddHours(-2),
             now.AddDays(2));
+        poll.Publish(now);
 
         dbContext.Polls.Add(poll);
         await dbContext.SaveChangesAsync(cancellationToken);

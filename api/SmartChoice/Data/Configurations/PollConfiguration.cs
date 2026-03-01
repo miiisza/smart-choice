@@ -12,6 +12,9 @@ public sealed class PollConfiguration : IEntityTypeConfiguration<Poll>
         builder.ToTable("polls", tableBuilder =>
         {
             tableBuilder.HasCheckConstraint("ck_polls_dates", "`ends_at` IS NULL OR `starts_at` IS NULL OR `ends_at` > `starts_at`");
+            tableBuilder.HasCheckConstraint("ck_polls_latitude", "`latitude` >= -90 AND `latitude` <= 90");
+            tableBuilder.HasCheckConstraint("ck_polls_longitude", "`longitude` >= -180 AND `longitude` <= 180");
+            tableBuilder.HasCheckConstraint("ck_polls_radius_meters", "`radius_meters` >= 1");
         });
 
         builder.HasKey(x => x.Id);
@@ -33,6 +36,21 @@ public sealed class PollConfiguration : IEntityTypeConfiguration<Poll>
             .HasColumnName("status")
             .HasConversion<byte>()
             .HasDefaultValue(PollStatus.Open)
+            .IsRequired();
+
+        builder.Property(x => x.Latitude)
+            .HasColumnName("latitude")
+            .HasColumnType("double")
+            .IsRequired();
+
+        builder.Property(x => x.Longitude)
+            .HasColumnName("longitude")
+            .HasColumnType("double")
+            .IsRequired();
+
+        builder.Property(x => x.RadiusMeters)
+            .HasColumnName("radius_meters")
+            .HasColumnType("int")
             .IsRequired();
 
         builder.Property(x => x.StartsAt)
@@ -83,5 +101,8 @@ public sealed class PollConfiguration : IEntityTypeConfiguration<Poll>
 
         builder.HasIndex(x => new { x.EndsAt, x.Status })
             .HasDatabaseName("ix_polls_ends_at_status");
+
+        builder.HasIndex(x => new { x.Latitude, x.Longitude })
+            .HasDatabaseName("ix_polls_lat_lng");
     }
 }

@@ -71,7 +71,7 @@ Oczekiwane:
 2. Pobierz poll i zdjęcie z feed:
 
 ```bash
-curl -s http://localhost:5148/api/polls/feed
+curl -s "http://localhost:5148/api/polls/feed?lat=52.2297&lng=21.0122&radius=5000&page=1"
 ```
 
 3. Oddaj głos:
@@ -94,7 +94,7 @@ Oczekiwane:
 ```bash
 curl -i -X POST http://localhost:5148/api/polls \
   -H 'Content-Type: application/json' \
-  -d '{"question":"Czy działa?","photoUrls":["https://a","https://b"]}'
+  -d '{"question":"Czy działa?","photoUrls":["https://a","https://b"],"latitude":52.2297,"longitude":21.0122,"radiusMeters":5000}'
 ```
 
 Oczekiwane:

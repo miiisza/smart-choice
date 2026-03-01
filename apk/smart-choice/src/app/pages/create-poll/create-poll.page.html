@@ -1,0 +1,230 @@
+<ion-header [translucent]="true">
+  <ion-toolbar>
+    <ion-title>Create Poll MVP</ion-title>
+    <ion-buttons slot="end">
+      <ion-button *ngIf="authSessionService.hasToken()" (click)="logout()">Wyloguj</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <div class="page-shell">
+    <ion-card>
+      <ion-card-header>
+        <ion-card-title>Sesja autora</ion-card-title>
+        <ion-card-subtitle>Do tworzenia i publikacji wymagane konto user</ion-card-subtitle>
+      </ion-card-header>
+      <ion-card-content>
+        <div class="session-state" *ngIf="authSessionService.isUserSession(); else loginFormBlock">
+          <ion-chip color="success">
+            <ion-label>Aktywna sesja autora</ion-label>
+          </ion-chip>
+        </div>
+
+        <ng-template #loginFormBlock>
+          <ion-list lines="full">
+            <ion-item>
+              <ion-label position="stacked">Email</ion-label>
+              <ion-input [(ngModel)]="authorEmail" type="email" autocomplete="email"></ion-input>
+            </ion-item>
+            <ion-item>
+              <ion-label position="stacked">Hasło</ion-label>
+              <ion-input [(ngModel)]="authorPassword" type="password" autocomplete="current-password"></ion-input>
+            </ion-item>
+          </ion-list>
+
+          <ion-button expand="block" [disabled]="isLoggingIn" (click)="signInAsAuthor()">
+            <ion-spinner slot="start" *ngIf="isLoggingIn"></ion-spinner>
+            Zaloguj autora
+          </ion-button>
+
+          <ion-item lines="none" color="danger" *ngIf="loginError">
+            <ion-label>{{ loginError }}</ion-label>
+          </ion-item>
+        </ng-template>
+      </ion-card-content>
+    </ion-card>
+
+    <ion-card>
+      <ion-card-header>
+        <ion-card-title>Create Poll Wizard</ion-card-title>
+        <ion-card-subtitle>1) zdjęcia → 2) audiencja → 3) publish</ion-card-subtitle>
+      </ion-card-header>
+      <ion-card-content>
+        <div class="wizard-steps">
+          <button type="button" [class.active]="step === 1" (click)="goToStep(1)">1. Zdjęcia</button>
+          <button type="button" [class.active]="step === 2" [disabled]="!hasValidPhotoCount" (click)="goToStep(2)">
+            2. Audiencja
+          </button>
+          <button type="button" [class.active]="step === 3" [disabled]="!hasValidAudience" (click)="goToStep(3)">
+            3. Publish
+          </button>
+        </div>
+
+        <section *ngIf="step === 1" class="step-block">
+          <input
+            #photoInput
+            class="hidden-input"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            (change)="onPhotoSelectionChange($event)"
+          />
+
+          <ion-button expand="block" fill="outline" (click)="photoInput.click()">Wybierz zdjęcia (2-4)</ion-button>
+          <p class="helper">Wybrane: {{ selectedPhotos.length }} / {{ maxPhotos }}</p>
+
+          <ion-item lines="none" class="empty-state" *ngIf="selectedPhotos.length === 0">
+            <ion-label>
+              Dodaj minimum 2 zdjęcia, żeby przejść dalej.
+            </ion-label>
+          </ion-item>
+
+          <div class="photo-grid" *ngIf="selectedPhotos.length > 0">
+            <ion-card *ngFor="let photo of selectedPhotos" class="photo-card">
+              <img [src]="photo.previewUrl" alt="Wybrane zdjęcie ankiety" />
+              <ion-card-content>
+                <div class="photo-row">
+                  <ion-chip [color]="photo.uploadStatus === 'error' ? 'danger' : photo.uploadStatus === 'done' ? 'success' : 'medium'">
+                    <ion-label>{{ photoStatusLabel(photo) }}</ion-label>
+                  </ion-chip>
+                  <ion-button size="small" fill="clear" color="danger" (click)="removePhoto(photo.id)">Usuń</ion-button>
+                </div>
+
+                <ion-progress-bar
+                  *ngIf="photo.uploadStatus === 'uploading' || photo.uploadStatus === 'done'"
+                  [value]="photo.progress / 100"
+                ></ion-progress-bar>
+
+                <p class="error" *ngIf="photo.errorMessage">{{ photo.errorMessage }}</p>
+              </ion-card-content>
+            </ion-card>
+          </div>
+
+          <ion-button expand="block" [disabled]="!hasValidPhotoCount" (click)="goToStep(2)">
+            Dalej: Audiencja
+          </ion-button>
+        </section>
+
+        <section *ngIf="step === 2" class="step-block">
+          <ion-list lines="full">
+            <ion-item>
+              <ion-label position="stacked">Pytanie</ion-label>
+              <ion-textarea
+                [(ngModel)]="question"
+                auto-grow="true"
+                maxlength="280"
+                placeholder="Które zdjęcie wybierasz?"
+              ></ion-textarea>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Latitude</ion-label>
+              <ion-input [(ngModel)]="latitude" type="number"></ion-input>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Longitude</ion-label>
+              <ion-input [(ngModel)]="longitude" type="number"></ion-input>
+            </ion-item>
+
+            <ion-item>
+              <ion-label position="stacked">Radius meters</ion-label>
+              <ion-input [(ngModel)]="radiusMeters" type="number"></ion-input>
+            </ion-item>
+          </ion-list>
+
+          <p class="helper" *ngIf="question.trim().length < 3">Pytanie musi mieć minimum 3 znaki.</p>
+
+          <div class="step-actions">
+            <ion-button fill="outline" (click)="goToStep(1)">Wstecz</ion-button>
+            <ion-button [disabled]="!hasValidAudience" (click)="goToStep(3)">Dalej: Publish</ion-button>
+          </div>
+        </section>
+
+        <section *ngIf="step === 3" class="step-block">
+          <ion-list lines="none" class="summary-list">
+            <ion-item>
+              <ion-label>
+                <h3>Pytanie</h3>
+                <p>{{ question }}</p>
+              </ion-label>
+            </ion-item>
+            <ion-item>
+              <ion-label>
+                <h3>Audiencja</h3>
+                <p>{{ latitude }}, {{ longitude }} | radius {{ radiusMeters }} m</p>
+              </ion-label>
+            </ion-item>
+            <ion-item>
+              <ion-label>
+                <h3>Zdjęcia</h3>
+                <p>{{ selectedPhotos.length }} pliki</p>
+              </ion-label>
+            </ion-item>
+            <ion-item>
+              <ion-label position="stacked">Invite code</ion-label>
+              <ion-input [(ngModel)]="inviteCode"></ion-input>
+            </ion-item>
+          </ion-list>
+
+          <ion-button expand="block" [disabled]="isPublishing || !canPublish" (click)="publish()">
+            <ion-spinner slot="start" *ngIf="isPublishing"></ion-spinner>
+            Publish
+          </ion-button>
+
+          <ion-item lines="none" color="warning" *ngIf="!authSessionService.isUserSession()">
+            <ion-label>Brak sesji user. Zaloguj konto autora przed publikacją.</ion-label>
+          </ion-item>
+
+          <div class="publishing-state" *ngIf="isPublishing">
+            <ion-progress-bar [value]="publishProgress"></ion-progress-bar>
+            <p>Wysłano {{ publishedPhotosCount }}/{{ selectedPhotos.length }} zdjęć.</p>
+            <ion-list>
+              <ion-item *ngFor="let slot of skeletonSlots">
+                <ion-thumbnail slot="start">
+                  <ion-skeleton-text animated></ion-skeleton-text>
+                </ion-thumbnail>
+                <ion-label>
+                  <ion-skeleton-text animated style="width: 70%"></ion-skeleton-text>
+                </ion-label>
+              </ion-item>
+            </ion-list>
+          </div>
+
+          <ion-item lines="none" color="danger" *ngIf="publishError">
+            <ion-label>{{ publishError }}</ion-label>
+          </ion-item>
+
+          <ion-card class="success-card" *ngIf="isPublished && createdPollId">
+            <ion-card-header>
+              <ion-card-title>Opublikowano</ion-card-title>
+              <ion-card-subtitle>Poll ID: {{ createdPollId }}</ion-card-subtitle>
+            </ion-card-header>
+            <ion-card-content>
+              <ion-list lines="none">
+                <ion-item>
+                  <ion-label position="stacked">Invite web link</ion-label>
+                  <ion-input [value]="webInviteLink" readonly></ion-input>
+                </ion-item>
+                <ion-item>
+                  <ion-label position="stacked">Invite deep link (Capacitor)</ion-label>
+                  <ion-input [value]="capacitorInviteLink" readonly></ion-input>
+                </ion-item>
+              </ion-list>
+
+              <div class="step-actions">
+                <ion-button fill="outline" (click)="openVoteScreen()">Otwórz Vote</ion-button>
+                <ion-button (click)="openResultsScreen()">Otwórz Results</ion-button>
+              </div>
+            </ion-card-content>
+          </ion-card>
+
+          <div class="step-actions">
+            <ion-button fill="outline" (click)="goToStep(2)">Wstecz</ion-button>
+          </div>
+        </section>
+      </ion-card-content>
+    </ion-card>
+  </div>
+</ion-content>

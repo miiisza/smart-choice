@@ -28,6 +28,37 @@ public sealed class PollPhotoConfiguration : IEntityTypeConfiguration<PollPhoto>
             .HasMaxLength(1024)
             .IsRequired();
 
+        builder.Property(x => x.ThumbnailUrl)
+            .HasColumnName("thumbnail_url")
+            .HasMaxLength(1024);
+
+        builder.Property(x => x.StorageKey)
+            .HasColumnName("storage_key")
+            .HasMaxLength(512);
+
+        builder.Property(x => x.ThumbnailStorageKey)
+            .HasColumnName("thumbnail_storage_key")
+            .HasMaxLength(512);
+
+        builder.Property(x => x.ContentType)
+            .HasColumnName("content_type")
+            .HasMaxLength(128);
+
+        builder.Property(x => x.FileSizeBytes)
+            .HasColumnName("file_size_bytes");
+
+        builder.Property(x => x.Width)
+            .HasColumnName("width");
+
+        builder.Property(x => x.Height)
+            .HasColumnName("height");
+
+        builder.Property(x => x.ThumbnailWidth)
+            .HasColumnName("thumbnail_width");
+
+        builder.Property(x => x.ThumbnailHeight)
+            .HasColumnName("thumbnail_height");
+
         builder.Property(x => x.DisplayOrder)
             .HasColumnName("display_order")
             .IsRequired();
@@ -53,5 +84,9 @@ public sealed class PollPhotoConfiguration : IEntityTypeConfiguration<PollPhoto>
 
         builder.HasIndex(x => x.PollId)
             .HasDatabaseName("ix_poll_photos_poll_id");
+
+        builder.HasIndex(x => x.StorageKey)
+            .IsUnique()
+            .HasDatabaseName("ux_poll_photos_storage_key");
     }
 }

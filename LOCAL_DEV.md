@@ -19,6 +19,15 @@ SMARTCHOICE_CORS_ORIGINS=http://localhost:8100,http://127.0.0.1:8100,http://loca
 Auth__Issuer=smart-choice-api
 Auth__Audience=smart-choice-client
 Auth__SigningKey=dev_only_change_me_to_a_long_32_char_secret_key
+ObjectStorage__BucketName=smart-choice-polls-dev
+ObjectStorage__Region=us-east-1
+ObjectStorage__AccessKey=minioadmin
+ObjectStorage__SecretKey=minioadmin
+ObjectStorage__ServiceUrl=http://localhost:9000
+ObjectStorage__PublicBaseUrl=http://localhost:9000
+ObjectStorage__ForcePathStyle=true
+ObjectStorage__ThumbnailWidth=480
+ObjectStorage__MaxUploadBytes=10485760
 ```
 
 Gotowiec: `api/SmartChoice/.env.example`
@@ -66,6 +75,17 @@ export SMARTCHOICE_CORS_ORIGINS='http://localhost:8100,http://127.0.0.1:8100,htt
 export Auth__Issuer='smart-choice-api'
 export Auth__Audience='smart-choice-client'
 export Auth__SigningKey='dev_only_change_me_to_a_long_32_char_secret_key'
+export ObjectStorage__BucketName='smart-choice-polls-dev'
+export ObjectStorage__Region='us-east-1'
+export ObjectStorage__AccessKey='minioadmin'
+export ObjectStorage__SecretKey='minioadmin'
+export ObjectStorage__ServiceUrl='http://localhost:9000'
+export ObjectStorage__PublicBaseUrl='http://localhost:9000'
+export ObjectStorage__ForcePathStyle=true
+export ObjectStorage__EnsureBucketExistsOnStartup=true
+export ObjectStorage__MakeBucketPublicOnStartup=true
+export ObjectStorage__ThumbnailWidth=480
+export ObjectStorage__MaxUploadBytes=10485760
 export Database__AutoMigrateOnStartup=true
 export Database__SeedDevDataOnStartup=true
 
@@ -112,3 +132,11 @@ Frontend wystartuje na `http://localhost:8100`.
 - Ionic base URL:
   - `apk/smart-choice/scripts/write-runtime-env.mjs` generuje `src/assets/env.js` na podstawie `IONIC_API_BASE_URL`
   - `src/environments/environment.ts` i `environment.prod.ts` czytają `window.__env.API_BASE_URL`
+
+## 5) Upload zdjęć (Ionic demo)
+
+W aktualnym `folder` view (`/folder/inbox`) jest minimalny UI do uploadu zdjęć:
+- podajesz `Poll ID` i `Bearer access token`,
+- wybierasz do 4 plików,
+- `Start upload` wysyła pliki na `POST /api/polls/{pollId}/photos`,
+- każdy plik ma progress bar i automatyczny retry (`2` próby przy błędach `5xx`/network).

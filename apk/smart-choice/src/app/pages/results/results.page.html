@@ -1,0 +1,90 @@
+<ion-header [translucent]="true">
+  <ion-toolbar>
+    <ion-title>Results</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="retry()">Odśwież</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <div class="page-shell">
+    <div class="skeleton-list" *ngIf="isLoading">
+      <ion-card>
+        <ion-card-content>
+          <ion-skeleton-text animated style="width: 55%"></ion-skeleton-text>
+          <ion-skeleton-text animated style="width: 35%"></ion-skeleton-text>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-list>
+        <ion-item *ngFor="let slot of skeletonSlots">
+          <ion-thumbnail slot="start">
+            <ion-skeleton-text animated></ion-skeleton-text>
+          </ion-thumbnail>
+          <ion-label>
+            <ion-skeleton-text animated style="width: 80%"></ion-skeleton-text>
+            <ion-skeleton-text animated style="width: 40%"></ion-skeleton-text>
+          </ion-label>
+        </ion-item>
+      </ion-list>
+    </div>
+
+    <ion-card *ngIf="!isLoading && errorMessage">
+      <ion-card-header>
+        <ion-card-title>Błąd ładowania wyników</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+        <p>{{ errorMessage }}</p>
+        <ion-button expand="block" (click)="retry()">Retry</ion-button>
+      </ion-card-content>
+    </ion-card>
+
+    <ng-container *ngIf="!isLoading && !errorMessage && results">
+      <ion-card *ngIf="results.winner; else noWinnerBlock">
+        <img [src]="results.winner.photoUrl" alt="Zwycięskie zdjęcie" />
+        <ion-card-header>
+          <ion-card-title>Winner</ion-card-title>
+          <ion-card-subtitle>
+            {{ results.winner.percentage | number: '1.0-2' }}% ({{ results.winner.voteCount }} głosów)
+          </ion-card-subtitle>
+        </ion-card-header>
+      </ion-card>
+
+      <ng-template #noWinnerBlock>
+        <ion-card>
+          <ion-card-header>
+            <ion-card-title>Brak zwycięzcy</ion-card-title>
+            <ion-card-subtitle>Ankieta nie ma jeszcze głosów.</ion-card-subtitle>
+          </ion-card-header>
+        </ion-card>
+      </ng-template>
+
+      <ion-card>
+        <ion-card-header>
+          <ion-card-title>Opcje</ion-card-title>
+          <ion-card-subtitle>Total votes: {{ results.totalVotes }}</ion-card-subtitle>
+        </ion-card-header>
+
+        <ion-list lines="full">
+          <ion-item *ngFor="let option of options">
+            <ion-thumbnail slot="start">
+              <img [src]="option.photoUrl" alt="Opcja wyników" />
+            </ion-thumbnail>
+            <ion-label>
+              <h3>{{ option.percentage | number: '1.0-2' }}%</h3>
+              <p>{{ option.voteCount }} głosów</p>
+              <ion-progress-bar [value]="option.percentage / 100"></ion-progress-bar>
+            </ion-label>
+          </ion-item>
+        </ion-list>
+      </ion-card>
+    </ng-container>
+  </div>
+</ion-content>
+
+<ion-footer>
+  <ion-toolbar>
+    <ion-button expand="block" [disabled]="pollId <= 0" (click)="openVote()">Oddaj głos</ion-button>
+  </ion-toolbar>
+</ion-footer>

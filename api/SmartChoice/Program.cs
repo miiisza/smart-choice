@@ -1,16 +1,24 @@
 using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Data;
+using System.Data.Common;
 using System.Text;
 using System.Text.Json;
+using Amazon;
+using Amazon.Runtime;
+using Amazon.S3;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using SmartChoice.Api.Auth;
 using SmartChoice.Api.Contracts;
+using SmartChoice.Api.Media;
+using SmartChoice.Api.Storage;
 using SmartChoice.Api.Validation;
 using SmartChoice.Data;
 using SmartChoice.Data.Seeding;
@@ -19,6 +27,7 @@ using SmartChoice.Domain.Enums;
 using SmartChoice.Domain.Exceptions;
 
 const string CorsPolicyName = "SmartChoiceDevCors";
+const int FeedPageSize = 20;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,6 +39,38 @@ builder.Services.AddSingleton<PasswordHashingService>();
 var authOptions = ResolveAuthOptions(builder.Configuration);
 builder.Services.AddSingleton(authOptions);
 builder.Services.AddSingleton<JwtTokenService>();
+
+var objectStorageOptions = ResolveObjectStorageOptions(builder.Configuration);
+builder.Services.AddSingleton(objectStorageOptions);
+builder.Services.AddSingleton<ImageProcessingService>();
+builder.Services.AddSingleton<IAmazonS3>(_ =>
+{
+    var config = new AmazonS3Config
+    {
+        ForcePathStyle = objectStorageOptions.ForcePathStyle,
+        RegionEndpoint = RegionEndpoint.GetBySystemName(objectStorageOptions.Region)
+    };
+
+    if (!string.IsNullOrWhiteSpace(objectStorageOptions.ServiceUrl))
+    {
+        config.ServiceURL = objectStorageOptions.ServiceUrl.TrimEnd('/');
+        config.AuthenticationRegion = objectStorageOptions.Region;
+    }
+
+    var hasExplicitCredentials = !string.IsNullOrWhiteSpace(objectStorageOptions.AccessKey)
+                                 && !string.IsNullOrWhiteSpace(objectStorageOptions.SecretKey);
+
+    return hasExplicitCredentials
+        ? new AmazonS3Client(
+            new BasicAWSCredentials(objectStorageOptions.AccessKey, objectStorageOptions.SecretKey),
+            config)
+        : new AmazonS3Client(config);
+});
+builder.Services.AddSingleton<IObjectStorageService, S3ObjectStorageService>();
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = objectStorageOptions.MaxUploadBytes + 1024 * 1024;
+});
 
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(authOptions.SigningKey));
 builder.Services
@@ -160,6 +201,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
     await ApplyMigrationsAndSeedAsync(app);
 }
+
+await EnsureObjectStorageReadyAsync(app);
 
 app.UseExceptionHandler();
 app.UseHttpsRedirection();
@@ -369,42 +412,28 @@ app.MapPost(
                 return Results.ValidationProblem(validationErrors);
             }
 
-            if (!TryGetLongClaim(httpContext.User, ClaimTypes.NameIdentifier, out var authorUserId))
-            {
-                return UnauthorizedProblem("Invalid user token.");
-            }
-
-            var authorExists = await dbContext.Users
-                .AsNoTracking()
-                .AnyAsync(user => user.Id == authorUserId && user.IsActive, cancellationToken);
-
-            if (!authorExists)
+            var authorUserId = await GetActiveUserIdAsync(httpContext.User, dbContext, cancellationToken);
+            if (!authorUserId.HasValue)
             {
                 return UnauthorizedProblem("Invalid user token.");
             }
 
             try
             {
-                var poll = Poll.Create(
-                    authorUserId,
+                var poll = Poll.CreateDraft(
+                    authorUserId.Value,
                     request.Question,
                     request.PhotoUrls,
+                    request.Latitude.GetValueOrDefault(),
+                    request.Longitude.GetValueOrDefault(),
+                    request.RadiusMeters.GetValueOrDefault(),
                     request.StartsAt,
                     request.EndsAt);
 
                 dbContext.Polls.Add(poll);
                 await dbContext.SaveChangesAsync(cancellationToken);
 
-                return Results.Created($"/api/polls/{poll.Id}", new
-                {
-                    poll.Id,
-                    poll.AuthorUserId,
-                    poll.Question,
-                    poll.Status,
-                    Photos = poll.Photos
-                        .OrderBy(photo => photo.DisplayOrder)
-                        .Select(photo => new { photo.Id, photo.PhotoUrl, photo.DisplayOrder })
-                });
+                return Results.Created($"/api/polls/{poll.Id}", ToPollDto(poll));
             }
             catch (DomainValidationException ex)
             {
@@ -412,6 +441,300 @@ app.MapPost(
                 {
                     ["domain"] = [ex.Message]
                 });
+            }
+        })
+    .RequireAuthorization(AuthConstants.RegisteredUserPolicy);
+
+app.MapPost(
+        "/api/polls/{pollId:long}/photos",
+        async (long pollId, [FromForm] IFormFile? file, HttpContext httpContext, SmartChoiceDbContext dbContext,
+            IObjectStorageService objectStorageService, ImageProcessingService imageProcessingService,
+            ObjectStorageOptions storageOptions, CancellationToken cancellationToken) =>
+        {
+            if (file is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["file"] = ["File is required."]
+                });
+            }
+
+            if (file.Length <= 0)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["file"] = ["File cannot be empty."]
+                });
+            }
+
+            if (file.Length > storageOptions.MaxUploadBytes)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["file"] = [$"Max file size is {storageOptions.MaxUploadBytes} bytes."]
+                });
+            }
+
+            var normalizedContentType = NormalizeImageContentType(file.ContentType);
+            if (normalizedContentType is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["file"] = ["Unsupported image type. Allowed types: image/jpeg, image/png, image/webp."]
+                });
+            }
+
+            var authorUserId = await GetActiveUserIdAsync(httpContext.User, dbContext, cancellationToken);
+            if (!authorUserId.HasValue)
+            {
+                return UnauthorizedProblem("Invalid user token.");
+            }
+
+            var poll = await dbContext.Polls
+                .Include(x => x.Photos)
+                .SingleOrDefaultAsync(x => x.Id == pollId, cancellationToken);
+
+            if (poll is null)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Poll not found",
+                    detail: $"Poll with id {pollId} does not exist.");
+            }
+
+            if (poll.AuthorUserId != authorUserId.Value)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Forbidden",
+                    detail: "Only the poll author can upload photos for this poll.");
+            }
+
+            if (poll.Status != PollStatus.Draft)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Poll photo upload rejected",
+                    detail: "Photos can only be uploaded for draft polls.");
+            }
+
+            if (poll.Photos.Count >= Poll.MaxPhotos)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Poll photo upload rejected",
+                    detail: $"Poll cannot contain more than {Poll.MaxPhotos} photos.");
+            }
+
+            await using var originalBuffer = new MemoryStream();
+            try
+            {
+                await using var sourceStream = file.OpenReadStream(storageOptions.MaxUploadBytes);
+                await sourceStream.CopyToAsync(originalBuffer, cancellationToken);
+            }
+            catch (IOException)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["file"] = [$"Max file size is {storageOptions.MaxUploadBytes} bytes."]
+                });
+            }
+            if (originalBuffer.Length <= 0)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["file"] = ["File cannot be empty."]
+                });
+            }
+
+            if (originalBuffer.Length > storageOptions.MaxUploadBytes)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["file"] = [$"Max file size is {storageOptions.MaxUploadBytes} bytes."]
+                });
+            }
+
+            ThumbnailResult thumbnail;
+            try
+            {
+                originalBuffer.Position = 0;
+                thumbnail = await imageProcessingService.CreateThumbnailAsync(
+                    originalBuffer,
+                    storageOptions.ThumbnailWidth,
+                    cancellationToken);
+                originalBuffer.Position = 0;
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["file"] = [ex.Message]
+                });
+            }
+
+            var extension = FileExtensionForImageContentType(normalizedContentType);
+            var keyRoot = $"polls/{pollId}/{Guid.NewGuid():N}";
+            var originalKey = $"{keyRoot}/original.{extension}";
+            var thumbnailKey = $"{keyRoot}/thumbnail.jpg";
+
+            StoredObject? originalObject = null;
+            StoredObject? thumbnailObject = null;
+            try
+            {
+                originalObject = await objectStorageService.UploadAsync(
+                    originalKey,
+                    originalBuffer,
+                    normalizedContentType,
+                    cancellationToken);
+
+                await using var thumbnailStream = new MemoryStream(thumbnail.Content, writable: false);
+                thumbnailObject = await objectStorageService.UploadAsync(
+                    thumbnailKey,
+                    thumbnailStream,
+                    thumbnail.ContentType,
+                    cancellationToken);
+
+                var photo = poll.AddUploadedPhoto(
+                    originalObject.Url,
+                    thumbnailObject.Url,
+                    originalObject.Key,
+                    thumbnailObject.Key,
+                    normalizedContentType,
+                    originalBuffer.Length,
+                    thumbnail.OriginalWidth,
+                    thumbnail.OriginalHeight,
+                    thumbnail.ThumbnailWidth,
+                    thumbnail.ThumbnailHeight);
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                return Results.Created(
+                    $"/api/polls/{pollId}/photos/{photo.Id}",
+                    new PollPhotoDto(photo.Id, photo.PhotoUrl, photo.ThumbnailUrl, photo.DisplayOrder));
+            }
+            catch (DomainValidationException ex)
+            {
+                if (originalObject is not null)
+                {
+                    await objectStorageService.DeleteIfExistsAsync(originalObject.Key, cancellationToken);
+                }
+
+                if (thumbnailObject is not null)
+                {
+                    await objectStorageService.DeleteIfExistsAsync(thumbnailObject.Key, cancellationToken);
+                }
+
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Poll photo upload rejected",
+                    detail: ex.Message);
+            }
+            catch
+            {
+                if (originalObject is not null)
+                {
+                    await objectStorageService.DeleteIfExistsAsync(originalObject.Key, cancellationToken);
+                }
+
+                if (thumbnailObject is not null)
+                {
+                    await objectStorageService.DeleteIfExistsAsync(thumbnailObject.Key, cancellationToken);
+                }
+
+                throw;
+            }
+        })
+    .RequireAuthorization(AuthConstants.RegisteredUserPolicy);
+
+app.MapPost(
+        "/api/polls/{pollId:long}/publish",
+        async (long pollId, HttpContext httpContext, SmartChoiceDbContext dbContext, CancellationToken cancellationToken) =>
+        {
+            var authorUserId = await GetActiveUserIdAsync(httpContext.User, dbContext, cancellationToken);
+            if (!authorUserId.HasValue)
+            {
+                return UnauthorizedProblem("Invalid user token.");
+            }
+
+            var poll = await dbContext.Polls
+                .Include(x => x.Photos)
+                .SingleOrDefaultAsync(x => x.Id == pollId, cancellationToken);
+
+            if (poll is null)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Poll not found",
+                    detail: $"Poll with id {pollId} does not exist.");
+            }
+
+            if (poll.AuthorUserId != authorUserId.Value)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Forbidden",
+                    detail: "Only the poll author can publish this poll.");
+            }
+
+            try
+            {
+                poll.Publish(DateTime.UtcNow);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return Results.Ok(ToPollDto(poll));
+            }
+            catch (DomainValidationException ex)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Poll publish rejected",
+                    detail: ex.Message);
+            }
+        })
+    .RequireAuthorization(AuthConstants.RegisteredUserPolicy);
+
+app.MapPost(
+        "/api/polls/{pollId:long}/close",
+        async (long pollId, HttpContext httpContext, SmartChoiceDbContext dbContext, CancellationToken cancellationToken) =>
+        {
+            var authorUserId = await GetActiveUserIdAsync(httpContext.User, dbContext, cancellationToken);
+            if (!authorUserId.HasValue)
+            {
+                return UnauthorizedProblem("Invalid user token.");
+            }
+
+            var poll = await dbContext.Polls
+                .Include(x => x.Photos)
+                .SingleOrDefaultAsync(x => x.Id == pollId, cancellationToken);
+
+            if (poll is null)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Poll not found",
+                    detail: $"Poll with id {pollId} does not exist.");
+            }
+
+            if (poll.AuthorUserId != authorUserId.Value)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Forbidden",
+                    detail: "Only the poll author can close this poll.");
+            }
+
+            try
+            {
+                poll.Close(DateTime.UtcNow);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return Results.Ok(ToPollDto(poll));
+            }
+            catch (DomainValidationException ex)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Poll close rejected",
+                    detail: ex.Message);
             }
         })
     .RequireAuthorization(AuthConstants.RegisteredUserPolicy);
@@ -425,6 +748,18 @@ app.MapPost(
             if (validationErrors.Count > 0)
             {
                 return Results.ValidationProblem(validationErrors);
+            }
+
+            var poll = await dbContext.Polls
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == request.PollId, cancellationToken);
+
+            if (poll is null)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Poll not found",
+                    detail: $"Poll with id {request.PollId} does not exist.");
             }
 
             var pollPhotoExists = await dbContext.PollPhotos
@@ -443,24 +778,28 @@ app.MapPost(
 
             try
             {
+                poll.EnsureCanAcceptVote(now);
+            }
+            catch (DomainValidationException ex)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Poll unavailable",
+                    detail: ex.Message);
+            }
+
+            try
+            {
                 Vote vote;
                 if (HasActor(httpContext.User, AuthActorTypes.User))
                 {
-                    if (!TryGetLongClaim(httpContext.User, ClaimTypes.NameIdentifier, out var voterUserId))
+                    var voterUserId = await GetActiveUserIdAsync(httpContext.User, dbContext, cancellationToken);
+                    if (!voterUserId.HasValue)
                     {
                         return UnauthorizedProblem("Invalid user token.");
                     }
 
-                    var userExists = await dbContext.Users
-                        .AsNoTracking()
-                        .AnyAsync(user => user.Id == voterUserId && user.IsActive, cancellationToken);
-
-                    if (!userExists)
-                    {
-                        return UnauthorizedProblem("Invalid user token.");
-                    }
-
-                    vote = Vote.CreateByUser(request.PollId, request.PollPhotoId, voterUserId);
+                    vote = Vote.CreateByUser(request.PollId, request.PollPhotoId, voterUserId.Value);
                 }
                 else if (HasActor(httpContext.User, AuthActorTypes.Guest))
                 {
@@ -495,15 +834,7 @@ app.MapPost(
                 dbContext.Votes.Add(vote);
                 await dbContext.SaveChangesAsync(cancellationToken);
 
-                return Results.Created($"/api/votes/{vote.Id}", new
-                {
-                    vote.Id,
-                    vote.PollId,
-                    vote.PollPhotoId,
-                    vote.VoterUserId,
-                    vote.GuestTokenId,
-                    vote.VotedAt
-                });
+                return Results.Created($"/api/votes/{vote.Id}", ToVoteDto(vote));
             }
             catch (DbUpdateException ex) when (IsVoteUniquenessViolation(ex))
             {
@@ -522,38 +853,20 @@ app.MapPost(
         })
     .RequireAuthorization();
 
-app.MapGet(
-    "/api/polls/feed",
-    async (SmartChoiceDbContext dbContext, int take = 20, CancellationToken cancellationToken = default) =>
-    {
-        var safeTake = Math.Clamp(take, 1, 100);
-
-        var feed = await dbContext.Polls
-            .AsNoTracking()
-            .Where(poll => poll.Status == PollStatus.Open)
-            .OrderByDescending(poll => poll.CreatedAt)
-            .Take(safeTake)
-            .Select(poll => new
-            {
-                poll.Id,
-                poll.Question,
-                poll.CreatedAt,
-                poll.EndsAt,
-                Photos = poll.Photos
-                    .OrderBy(photo => photo.DisplayOrder)
-                    .Select(photo => new { photo.Id, photo.PhotoUrl, photo.DisplayOrder })
-            })
-            .ToListAsync(cancellationToken);
-
-        return Results.Ok(feed);
-    });
+app.MapGet("/feed", GetLocalFeedAsync);
+app.MapGet("/api/polls/feed", GetLocalFeedAsync);
 
 app.MapGet(
     "/api/polls/{pollId:long}/results",
     async (long pollId, SmartChoiceDbContext dbContext, CancellationToken cancellationToken) =>
     {
-        var pollExists = await dbContext.Polls.AsNoTracking().AnyAsync(poll => poll.Id == pollId, cancellationToken);
-        if (!pollExists)
+        var poll = await dbContext.Polls
+            .AsNoTracking()
+            .Where(x => x.Id == pollId)
+            .Select(x => new { x.Id, x.Status })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (poll is null)
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status404NotFound,
@@ -561,20 +874,60 @@ app.MapGet(
                 detail: $"Poll with id {pollId} does not exist.");
         }
 
-        var results = await dbContext.PollPhotos
+        var voteCountsPerPhoto = dbContext.Votes
+            .AsNoTracking()
+            .Where(vote => vote.PollId == pollId)
+            .GroupBy(vote => vote.PollPhotoId)
+            .Select(group => new
+            {
+                PollPhotoId = group.Key,
+                VoteCount = group.Count()
+            });
+
+        var optionRows = await dbContext.PollPhotos
             .AsNoTracking()
             .Where(photo => photo.PollId == pollId)
+            .GroupJoin(
+                voteCountsPerPhoto,
+                photo => photo.Id,
+                voteCount => voteCount.PollPhotoId,
+                (photo, voteCount) => new
+                {
+                    photo.Id,
+                    photo.PhotoUrl,
+                    photo.DisplayOrder,
+                    VoteCount = voteCount.Select(x => x.VoteCount).FirstOrDefault()
+                })
             .OrderBy(photo => photo.DisplayOrder)
-            .Select(photo => new
-            {
-                photo.Id,
-                photo.PhotoUrl,
-                photo.DisplayOrder,
-                Votes = photo.Votes.Count
-            })
             .ToListAsync(cancellationToken);
 
-        return Results.Ok(results);
+        var totalVotes = optionRows.Sum(row => row.VoteCount);
+
+        var options = optionRows
+            .Select(row => new PollResultOptionDto(
+                row.Id,
+                row.PhotoUrl,
+                row.DisplayOrder,
+                row.VoteCount,
+                CalculatePercentage(row.VoteCount, totalVotes)))
+            .ToArray();
+
+        var topOption = options
+            .OrderByDescending(option => option.VoteCount)
+            .ThenBy(option => option.DisplayOrder)
+            .FirstOrDefault();
+
+        PollWinnerDto? winner = null;
+        if (topOption is not null && topOption.VoteCount > 0)
+        {
+            winner = new PollWinnerDto(
+                topOption.PollPhotoId,
+                topOption.PhotoUrl,
+                topOption.VoteCount,
+                topOption.Percentage);
+        }
+
+        return Results.Ok(new PollResultsDto(poll.Id, poll.Status, totalVotes, winner, options));
     });
 
 app.Run();
@@ -633,6 +986,55 @@ static AuthOptions ResolveAuthOptions(IConfiguration configuration)
     };
 }
 
+static ObjectStorageOptions ResolveObjectStorageOptions(IConfiguration configuration)
+{
+    var options = configuration.GetSection(ObjectStorageOptions.SectionName).Get<ObjectStorageOptions>()
+                  ?? new ObjectStorageOptions();
+
+    if (string.IsNullOrWhiteSpace(options.BucketName))
+    {
+        throw new InvalidOperationException("Missing ObjectStorage:BucketName.");
+    }
+
+    if (string.IsNullOrWhiteSpace(options.Region))
+    {
+        throw new InvalidOperationException("Missing ObjectStorage:Region.");
+    }
+
+    var hasAccessKey = !string.IsNullOrWhiteSpace(options.AccessKey);
+    var hasSecretKey = !string.IsNullOrWhiteSpace(options.SecretKey);
+    if (hasAccessKey != hasSecretKey)
+    {
+        throw new InvalidOperationException(
+            "ObjectStorage:AccessKey and ObjectStorage:SecretKey must be set together or both left empty.");
+    }
+
+    if (options.ThumbnailWidth <= 0)
+    {
+        throw new InvalidOperationException("ObjectStorage:ThumbnailWidth must be greater than zero.");
+    }
+
+    if (options.MaxUploadBytes <= 0)
+    {
+        throw new InvalidOperationException("ObjectStorage:MaxUploadBytes must be greater than zero.");
+    }
+
+    return new ObjectStorageOptions
+    {
+        BucketName = options.BucketName.Trim(),
+        Region = options.Region.Trim(),
+        AccessKey = (options.AccessKey ?? string.Empty).Trim(),
+        SecretKey = (options.SecretKey ?? string.Empty).Trim(),
+        ServiceUrl = string.IsNullOrWhiteSpace(options.ServiceUrl) ? null : options.ServiceUrl.Trim().TrimEnd('/'),
+        PublicBaseUrl = string.IsNullOrWhiteSpace(options.PublicBaseUrl) ? null : options.PublicBaseUrl.Trim().TrimEnd('/'),
+        ForcePathStyle = options.ForcePathStyle,
+        EnsureBucketExistsOnStartup = options.EnsureBucketExistsOnStartup,
+        MakeBucketPublicOnStartup = options.MakeBucketPublicOnStartup,
+        ThumbnailWidth = options.ThumbnailWidth,
+        MaxUploadBytes = options.MaxUploadBytes
+    };
+}
+
 static HealthCheckOptions CreateHealthOptions(string tag)
 {
     return new HealthCheckOptions
@@ -683,6 +1085,222 @@ static async Task ApplyMigrationsAndSeedAsync(WebApplication app)
     }
 }
 
+static async Task EnsureObjectStorageReadyAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("StartupStorage");
+    var objectStorage = scope.ServiceProvider.GetRequiredService<IObjectStorageService>();
+    await objectStorage.EnsureBucketReadyAsync(CancellationToken.None);
+    logger.LogInformation("Object storage bucket is ready.");
+}
+
+static async Task<IResult> GetLocalFeedAsync(
+    SmartChoiceDbContext dbContext,
+    double lat,
+    double lng,
+    int radius,
+    int page = 1,
+    CancellationToken cancellationToken = default)
+{
+    var validationErrors = ValidateFeedRequest(lat, lng, radius, page);
+    if (validationErrors.Count > 0)
+    {
+        return Results.ValidationProblem(validationErrors);
+    }
+
+    var offset = ((long)page - 1L) * FeedPageSize;
+    if (offset > int.MaxValue)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            [nameof(page)] = ["Page is too large."]
+        });
+    }
+
+    var rows = await QueryFeedDistanceRowsAsync(
+        dbContext,
+        lat,
+        lng,
+        radius,
+        FeedPageSize + 1,
+        offset,
+        cancellationToken);
+
+    var hasNextPage = rows.Count > FeedPageSize;
+    var pageRows = hasNextPage
+        ? rows.Take(FeedPageSize).ToArray()
+        : rows.ToArray();
+
+    if (pageRows.Length == 0)
+    {
+        return Results.Ok(new FeedPageDto(page, FeedPageSize, false, "newest", []));
+    }
+
+    var pollIds = pageRows.Select(row => row.PollId).ToArray();
+
+    var polls = await dbContext.Polls
+        .AsNoTracking()
+        .Where(poll => pollIds.Contains(poll.Id))
+        .Select(poll => new
+        {
+            poll.Id,
+            poll.Question,
+            poll.CreatedAt,
+            poll.EndsAt,
+            poll.Latitude,
+            poll.Longitude,
+            poll.RadiusMeters,
+            Photos = poll.Photos
+                .OrderBy(photo => photo.DisplayOrder)
+                .Select(photo => new PollPhotoDto(photo.Id, photo.PhotoUrl, photo.ThumbnailUrl, photo.DisplayOrder))
+        })
+        .ToListAsync(cancellationToken);
+
+    var orderByPollId = pageRows
+        .Select((row, index) => new { row.PollId, index })
+        .ToDictionary(x => x.PollId, x => x.index);
+
+    var distanceByPollId = pageRows.ToDictionary(row => row.PollId, row => row.DistanceMeters);
+
+    var items = polls
+        .OrderBy(poll => orderByPollId[poll.Id])
+        .Select(poll => new FeedPollDto(
+            poll.Id,
+            poll.Question,
+            poll.CreatedAt,
+            poll.EndsAt,
+            poll.Latitude,
+            poll.Longitude,
+            poll.RadiusMeters,
+            Math.Round(distanceByPollId[poll.Id], 2, MidpointRounding.AwayFromZero),
+            poll.Photos.ToArray()))
+        .ToArray();
+
+    return Results.Ok(new FeedPageDto(page, FeedPageSize, hasNextPage, "newest", items));
+}
+
+static Dictionary<string, string[]> ValidateFeedRequest(double lat, double lng, int radius, int page)
+{
+    var errors = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+    static void AddError(Dictionary<string, List<string>> errorMap, string key, string message)
+    {
+        if (!errorMap.TryGetValue(key, out var messages))
+        {
+            messages = [];
+            errorMap[key] = messages;
+        }
+
+        messages.Add(message);
+    }
+
+    if (double.IsNaN(lat) || double.IsInfinity(lat) || lat is < -90 or > 90)
+    {
+        AddError(errors, nameof(lat), "Latitude must be in range [-90, 90].");
+    }
+
+    if (double.IsNaN(lng) || double.IsInfinity(lng) || lng is < -180 or > 180)
+    {
+        AddError(errors, nameof(lng), "Longitude must be in range [-180, 180].");
+    }
+
+    if (radius is < Poll.MinRadiusMeters or > Poll.MaxRadiusMeters)
+    {
+        AddError(
+            errors,
+            nameof(radius),
+            $"Radius must be in range [{Poll.MinRadiusMeters}, {Poll.MaxRadiusMeters}] meters.");
+    }
+
+    if (page < 1)
+    {
+        AddError(errors, nameof(page), "Page must be greater than zero.");
+    }
+
+    return errors.ToDictionary(
+        entry => entry.Key,
+        entry => entry.Value.Distinct(StringComparer.Ordinal).ToArray(),
+        StringComparer.Ordinal);
+}
+
+static async Task<List<FeedDistanceSqlRow>> QueryFeedDistanceRowsAsync(
+    SmartChoiceDbContext dbContext,
+    double lat,
+    double lng,
+    int radius,
+    int limit,
+    long offset,
+    CancellationToken cancellationToken)
+{
+    var connection = dbContext.Database.GetDbConnection();
+    var shouldCloseConnection = connection.State != ConnectionState.Open;
+    if (shouldCloseConnection)
+    {
+        await connection.OpenAsync(cancellationToken);
+    }
+
+    try
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandType = CommandType.Text;
+        command.CommandText = """
+                              SELECT ranked.id AS poll_id, ranked.distance_meters
+                              FROM (
+                                  SELECT
+                                      p.id,
+                                      p.created_at,
+                                      p.radius_meters,
+                                      ST_Distance_Sphere(
+                                          p.location,
+                                          ST_SRID(POINT(@lng, @lat), 4326)
+                                      ) AS distance_meters
+                                  FROM polls p
+                                  WHERE p.status = @status
+                              ) AS ranked
+                              WHERE ranked.distance_meters <= LEAST(ranked.radius_meters, @radius)
+                              ORDER BY ranked.created_at DESC, ranked.id DESC
+                              LIMIT @limit OFFSET @offset;
+                              """;
+
+        AddDbParameter(command, "@lng", DbType.Double, lng);
+        AddDbParameter(command, "@lat", DbType.Double, lat);
+        AddDbParameter(command, "@status", DbType.Byte, (byte)PollStatus.Open);
+        AddDbParameter(command, "@radius", DbType.Int32, radius);
+        AddDbParameter(command, "@limit", DbType.Int32, limit);
+        AddDbParameter(command, "@offset", DbType.Int64, offset);
+
+        var rows = new List<FeedDistanceSqlRow>(limit);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var pollIdOrdinal = reader.GetOrdinal("poll_id");
+        var distanceOrdinal = reader.GetOrdinal("distance_meters");
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var pollId = reader.GetInt64(pollIdOrdinal);
+            var distance = Convert.ToDouble(reader.GetValue(distanceOrdinal), CultureInfo.InvariantCulture);
+            rows.Add(new FeedDistanceSqlRow(pollId, distance));
+        }
+
+        return rows;
+    }
+    finally
+    {
+        if (shouldCloseConnection)
+        {
+            await connection.CloseAsync();
+        }
+    }
+}
+
+static void AddDbParameter(DbCommand command, string name, DbType type, object value)
+{
+    var parameter = command.CreateParameter();
+    parameter.ParameterName = name;
+    parameter.DbType = type;
+    parameter.Value = value;
+    command.Parameters.Add(parameter);
+}
+
 static bool IsVoteUniquenessViolation(DbUpdateException exception)
 {
     var message = exception.ToString();
@@ -690,6 +1308,66 @@ static bool IsVoteUniquenessViolation(DbUpdateException exception)
            || message.Contains("ux_votes_poll_guest_token", StringComparison.OrdinalIgnoreCase)
            || message.Contains("Duplicate entry", StringComparison.OrdinalIgnoreCase)
            || message.Contains("duplicate", StringComparison.OrdinalIgnoreCase);
+}
+
+static PollDto ToPollDto(Poll poll)
+{
+    var photos = poll.Photos
+        .OrderBy(photo => photo.DisplayOrder)
+        .Select(photo => new PollPhotoDto(photo.Id, photo.PhotoUrl, photo.ThumbnailUrl, photo.DisplayOrder))
+        .ToArray();
+
+    return new PollDto(
+        poll.Id,
+        poll.AuthorUserId,
+        poll.Question,
+        poll.Status,
+        poll.Latitude,
+        poll.Longitude,
+        poll.RadiusMeters,
+        poll.StartsAt,
+        poll.EndsAt,
+        poll.CreatedAt,
+        poll.UpdatedAt,
+        photos);
+}
+
+static VoteDto ToVoteDto(Vote vote)
+{
+    return new VoteDto(
+        vote.Id,
+        vote.PollId,
+        vote.PollPhotoId,
+        vote.VoterUserId,
+        vote.GuestTokenId,
+        vote.VotedAt);
+}
+
+static decimal CalculatePercentage(int optionVotes, int totalVotes)
+{
+    if (totalVotes <= 0)
+    {
+        return 0m;
+    }
+
+    return Math.Round((decimal)optionVotes * 100m / totalVotes, 2, MidpointRounding.AwayFromZero);
+}
+
+static async Task<long?> GetActiveUserIdAsync(
+    ClaimsPrincipal principal,
+    SmartChoiceDbContext dbContext,
+    CancellationToken cancellationToken)
+{
+    if (!TryGetLongClaim(principal, ClaimTypes.NameIdentifier, out var userId))
+    {
+        return null;
+    }
+
+    var isActive = await dbContext.Users
+        .AsNoTracking()
+        .AnyAsync(user => user.Id == userId && user.IsActive, cancellationToken);
+
+    return isActive ? userId : null;
 }
 
 static IResult UnauthorizedProblem(string detail)
@@ -717,6 +1395,35 @@ static bool HasActor(ClaimsPrincipal principal, string actorType)
 {
     var value = principal.FindFirst(AuthClaimTypes.ActorType)?.Value;
     return string.Equals(value, actorType, StringComparison.Ordinal);
+}
+
+static string? NormalizeImageContentType(string? contentType)
+{
+    if (string.IsNullOrWhiteSpace(contentType))
+    {
+        return null;
+    }
+
+    var normalized = contentType.Trim().ToLowerInvariant();
+    return normalized switch
+    {
+        "image/jpg" => "image/jpeg",
+        "image/jpeg" => "image/jpeg",
+        "image/png" => "image/png",
+        "image/webp" => "image/webp",
+        _ => null
+    };
+}
+
+static string FileExtensionForImageContentType(string contentType)
+{
+    return contentType switch
+    {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        _ => "bin"
+    };
 }
 
 static async Task<string> GenerateUniqueUsernameAsync(
@@ -763,3 +1470,5 @@ static string NormalizeUsernameCandidate(string value)
 
     return new string(chars);
 }
+
+sealed record FeedDistanceSqlRow(long PollId, double DistanceMeters);

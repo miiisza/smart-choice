@@ -1,0 +1,98 @@
+.page-shell {
+  padding: 12px;
+}
+
+.wizard-steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.wizard-steps button {
+  border: 1px solid var(--ion-color-medium);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ion-color-medium-shade);
+  padding: 10px;
+  font-size: 13px;
+}
+
+.wizard-steps button.active {
+  border-color: var(--ion-color-primary);
+  color: var(--ion-color-primary);
+  font-weight: 600;
+}
+
+.wizard-steps button:disabled {
+  opacity: 0.45;
+}
+
+.step-block {
+  display: grid;
+  gap: 12px;
+}
+
+.hidden-input {
+  display: none;
+}
+
+.helper {
+  margin: 0;
+  color: var(--ion-color-medium-shade);
+}
+
+.empty-state {
+  --background: rgba(var(--ion-color-medium-rgb), 0.08);
+  border-radius: 12px;
+}
+
+.photo-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.photo-card img {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+}
+
+.photo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.error {
+  color: var(--ion-color-danger);
+  margin: 6px 0 0;
+}
+
+.step-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.publishing-state p {
+  margin: 8px 0;
+  color: var(--ion-color-medium-shade);
+}
+
+.success-card {
+  margin: 0;
+}
+
+@media (min-width: 768px) {
+  .page-shell {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  .photo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
