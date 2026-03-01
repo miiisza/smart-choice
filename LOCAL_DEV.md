@@ -60,6 +60,14 @@ export ASPNETCORE_ENVIRONMENT=Development
 export ASPNETCORE_URLS=http://localhost:5148
 export ConnectionStrings__Default='Server=localhost;Port=3306;Database=smart_choice;User=smart_choice;Password=smart_choice_dev;'
 export SMARTCHOICE_CORS_ORIGINS='http://localhost:8100,http://127.0.0.1:8100,http://localhost,capacitor://localhost'
+export Database__AutoMigrateOnStartup=true
+export Database__SeedDevDataOnStartup=true
+
+# jednorazowo (jeśli nie masz): narzędzie migracji
+dotnet tool install --global dotnet-ef
+
+# aktualizacja schematu MySQL do najnowszej migracji
+dotnet ef database update --project SmartChoice/SmartChoice.csproj --startup-project SmartChoice/SmartChoice.csproj
 
 dotnet run --project SmartChoice/SmartChoice.csproj
 ```

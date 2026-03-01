@@ -1,0 +1,13 @@
+api/SmartChoice/appsettings.json
+api/SmartChoice/bin/
+api/SmartChoice/obj/
+api/SmartChoice/.idea/
+api/.idea/
+
+.env.prod
+.env
+
+certificate.perm
+certificateCA.perm
+privateKey.perm
+fullchain.perm
