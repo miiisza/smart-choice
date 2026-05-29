@@ -113,8 +113,8 @@ export class FolderPage implements OnInit, OnDestroy {
 
         if (state.status === 'done') {
           item.status = 'done';
-          item.photoUrl = state.photo?.photoUrl;
-          item.thumbnailUrl = state.photo?.thumbnailUrl;
+          item.photoUrl = state.photo?.displayUrl ?? state.photo?.photoUrl;
+          item.thumbnailUrl = state.photo?.thumbUrl ?? state.photo?.thumbnailUrl;
           item.errorMessage = undefined;
           return;
         }

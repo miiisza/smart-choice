@@ -18,10 +18,10 @@ export class AuthApiService {
     );
   }
 
-  issueGuestToken(inviteCode: string): Observable<GuestTokenResponse> {
+  issueGuestToken(inviteCode: string, pollId: number): Observable<GuestTokenResponse> {
     return this.httpClient.post<GuestTokenResponse>(
       `${environment.apiBaseUrl}/api/auth/guest`,
-      { inviteCode },
+      { inviteCode, pollId },
       { headers: new HttpHeaders({ [SkipAuthHeader]: '1' }) }
     );
   }

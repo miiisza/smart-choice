@@ -58,12 +58,12 @@ Oczekiwane:
 ```bash
 curl -i -X POST http://localhost:5148/api/auth/guest \
   -H 'Content-Type: application/json' \
-  -d '{"inviteCode":"DEV2026"}'
+  -d '{"inviteCode":"DEV2026","pollId":1}'
 ```
 
 Oczekiwane:
 - `200 OK`
-- body zawiera `guestToken` (JWT) i `expiresAt`
+- body zawiera `guestToken` (JWT), `expiresAt` i `pollId`
 
 ## 6) Głosowanie guest: pierwszy głos 201, drugi na ten sam poll 409
 
@@ -100,3 +100,36 @@ curl -i -X POST http://localhost:5148/api/polls \
 Oczekiwane:
 - bez tokena: `401 Unauthorized` (`application/problem+json`)
 - z JWT usera: `201 Created`
+
+## 8) Rate limiting `POST /api/auth/guest` -> 429
+
+W 60 sekundach wykonaj więcej niż 8 requestów (ten sam host/IP):
+
+```bash
+for i in $(seq 1 10); do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:5148/api/auth/guest \
+    -H 'Content-Type: application/json' \
+    -d '{"inviteCode":"DEV2026","pollId":1}'
+done
+```
+
+Oczekiwane:
+- część requestów: `200`
+- po przekroczeniu limitu: `429 Too Many Requests`
+- odpowiedź to `application/problem+json`
+
+## 9) Kontrakt ProblemDetails (spójność)
+
+Sprawdź dowolny błąd walidacji, np. pusty invite code:
+
+```bash
+curl -i -X POST http://localhost:5148/api/auth/guest \
+  -H 'Content-Type: application/json' \
+  -d '{"inviteCode":"","pollId":1}'
+```
+
+Oczekiwane:
+- status: `400`
+- `Content-Type: application/problem+json`
+- body zawiera: `type`, `title`, `status`, `instance`, `traceId`
+- dla walidacji dodatkowo: `errors`

@@ -3,7 +3,6 @@ import {
   HttpErrorResponse,
   HttpEvent,
   HttpEventType,
-  HttpRequest,
 } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, catchError, defer, map, of, retry, throwError, timer } from 'rxjs';
@@ -59,18 +58,11 @@ export class PollPhotoUploadService {
     const formData = new FormData();
     formData.append('file', file, file.name);
 
-    const request = new HttpRequest<PollPhotoDto>(
-      'POST',
-      `${environment.apiBaseUrl}/api/polls/${pollId}/photos`,
-      formData,
-      {
-        reportProgress: true,
-        responseType: 'json',
-      }
-    );
-
     return this.httpClient
-      .request<PollPhotoDto>(request)
+      .post<PollPhotoDto>(`${environment.apiBaseUrl}/api/polls/${pollId}/photos`, formData, {
+        observe: 'events',
+        reportProgress: true,
+      })
       .pipe(map((event: HttpEvent<PollPhotoDto>) => this.toUploadState(event, attempt)));
   }
 

@@ -8,6 +8,7 @@ interface StoredSession {
   accessToken: string;
   tokenType: string;
   accessTokenExpiresAt: string;
+  pollId?: number;
   refreshToken?: string;
   refreshTokenExpiresAt?: string;
 }
@@ -27,6 +28,18 @@ export class AuthSessionService {
 
   hasToken(): boolean {
     return Boolean(this.session?.accessToken);
+  }
+
+  canVoteOnPoll(pollId: number): boolean {
+    if (!this.session?.accessToken) {
+      return false;
+    }
+
+    if (this.session.actor === 'user') {
+      return true;
+    }
+
+    return this.session.pollId === pollId;
   }
 
   isUserSession(): boolean {
@@ -52,6 +65,7 @@ export class AuthSessionService {
       accessToken: tokens.guestToken,
       tokenType: tokens.tokenType,
       accessTokenExpiresAt: tokens.expiresAt,
+      pollId: tokens.pollId,
     };
 
     this.persistSession();
@@ -81,11 +95,19 @@ export class AuthSessionService {
         return null;
       }
 
+      if (
+        parsed.actor === 'guest' &&
+        (typeof parsed.pollId !== 'number' || !Number.isInteger(parsed.pollId) || parsed.pollId <= 0)
+      ) {
+        return null;
+      }
+
       return {
         actor: parsed.actor,
         accessToken: parsed.accessToken,
         tokenType: parsed.tokenType,
         accessTokenExpiresAt: parsed.accessTokenExpiresAt,
+        pollId: typeof parsed.pollId === 'number' ? parsed.pollId : undefined,
         refreshToken: parsed.refreshToken,
         refreshTokenExpiresAt: parsed.refreshTokenExpiresAt,
       };

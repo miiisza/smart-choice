@@ -73,9 +73,13 @@ function buildProblemMessage(problem: ProblemDetails, statusCode: number): strin
     return problem.detail;
   }
 
-  const firstValidationMessage = Object.values(problem.errors ?? {})
-    .flat()
-    .find((message) => message.trim().length > 0);
+  const validationMessages: string[] = Object.values(problem.errors ?? {}).reduce(
+    (allMessages: string[], fieldMessages: string[]) => allMessages.concat(fieldMessages),
+    []
+  );
+  const firstValidationMessage = validationMessages.find(
+    (message: string) => message.trim().length > 0
+  );
 
   if (firstValidationMessage) {
     return firstValidationMessage;

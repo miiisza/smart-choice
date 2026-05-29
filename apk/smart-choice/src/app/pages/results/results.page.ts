@@ -18,8 +18,10 @@ export class ResultsPage implements OnInit, OnDestroy {
   isLoading = true;
   errorMessage: string | null = null;
   results: PollResultsDto | null = null;
+  isRefreshingImages = false;
 
   private routeSubscription?: Subscription;
+  private hasRefetchedAfterImageError = false;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -48,7 +50,34 @@ export class ResultsPage implements OnInit, OnDestroy {
   }
 
   retry(): void {
+    this.hasRefetchedAfterImageError = false;
     void this.loadResults(this.pollId);
+  }
+
+  resolveWinnerImageUrl(): string {
+    if (!this.results?.winner) {
+      return '';
+    }
+
+    return this.results.winner.displayUrl || this.results.winner.photoUrl;
+  }
+
+  resolveOptionImageUrl(option: PollResultOptionDto): string {
+    return option.displayUrl || option.photoUrl;
+  }
+
+  async onImageLoadError(): Promise<void> {
+    if (this.pollId <= 0 || this.isLoading || this.isRefreshingImages || this.hasRefetchedAfterImageError) {
+      return;
+    }
+
+    this.hasRefetchedAfterImageError = true;
+    this.isRefreshingImages = true;
+    try {
+      await this.loadResults(this.pollId, true);
+    } finally {
+      this.isRefreshingImages = false;
+    }
   }
 
   openVote(): void {
@@ -59,9 +88,11 @@ export class ResultsPage implements OnInit, OnDestroy {
     void this.router.navigate(['/vote', this.pollId]);
   }
 
-  private async loadResults(pollId: number): Promise<void> {
+  private async loadResults(pollId: number, silentRefresh: boolean = false): Promise<void> {
     this.pollId = pollId;
-    this.isLoading = true;
+    if (!silentRefresh) {
+      this.isLoading = true;
+    }
     this.errorMessage = null;
 
     if (!Number.isInteger(pollId) || pollId <= 0) {
@@ -80,7 +111,9 @@ export class ResultsPage implements OnInit, OnDestroy {
         'Nie udało się pobrać wyników.'
       );
     } finally {
-      this.isLoading = false;
+      if (!silentRefresh) {
+        this.isLoading = false;
+      }
     }
   }
 }

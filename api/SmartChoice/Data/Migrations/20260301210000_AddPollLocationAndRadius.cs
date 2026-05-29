@@ -52,20 +52,10 @@ namespace SmartChoice.Data.Migrations
                 name: "ix_polls_lat_lng",
                 table: "polls",
                 columns: new[] { "latitude", "longitude" });
-
-            migrationBuilder.Sql(
-                "ALTER TABLE polls ADD COLUMN location POINT SRID 4326 NOT NULL GENERATED ALWAYS AS (ST_SRID(POINT(`longitude`, `latitude`), 4326)) STORED;");
-            migrationBuilder.Sql("CREATE SPATIAL INDEX ix_polls_location ON polls (location);");
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("DROP INDEX ix_polls_location ON polls;");
-
-            migrationBuilder.DropColumn(
-                name: "location",
-                table: "polls");
-
             migrationBuilder.DropCheckConstraint(
                 name: "ck_polls_latitude",
                 table: "polls");

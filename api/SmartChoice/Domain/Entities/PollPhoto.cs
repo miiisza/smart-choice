@@ -111,8 +111,6 @@ public sealed class PollPhoto
 
     internal static PollPhoto CreateUploadedForPoll(
         Poll poll,
-        string photoUrl,
-        string thumbnailUrl,
         string storageKey,
         string thumbnailStorageKey,
         string contentType,
@@ -123,11 +121,6 @@ public sealed class PollPhoto
         int thumbnailHeight,
         int displayOrder)
     {
-        if (string.IsNullOrWhiteSpace(thumbnailUrl))
-        {
-            throw new DomainValidationException("ThumbnailUrl is required for uploaded photos.");
-        }
-
         if (string.IsNullOrWhiteSpace(storageKey) || string.IsNullOrWhiteSpace(thumbnailStorageKey))
         {
             throw new DomainValidationException("Object storage keys are required for uploaded photos.");
@@ -140,8 +133,8 @@ public sealed class PollPhoto
 
         return new PollPhoto(
             poll,
-            photoUrl,
-            thumbnailUrl,
+            storageKey,
+            thumbnailStorageKey,
             storageKey,
             thumbnailStorageKey,
             contentType,

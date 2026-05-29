@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Amazon.S3;
 using Amazon.S3.Model;
 using Amazon.S3.Util;
@@ -14,7 +13,6 @@ public sealed class S3ObjectStorageService(
     private readonly ObjectStorageOptions _options = options;
     private readonly ILogger<S3ObjectStorageService> _logger = logger;
     private readonly string _normalizedBucketName = options.BucketName.Trim();
-    private readonly string? _normalizedPublicBaseUrl = NormalizeUrl(options.PublicBaseUrl ?? options.ServiceUrl);
 
     public async Task EnsureBucketReadyAsync(CancellationToken cancellationToken)
     {
@@ -36,28 +34,13 @@ public sealed class S3ObjectStorageService(
 
         if (_options.MakeBucketPublicOnStartup)
         {
-            var policyJson = JsonSerializer.Serialize(new
-            {
-                Version = "2012-10-17",
-                Statement = new[]
-                {
-                    new
-                    {
-                        Sid = "AllowPublicRead",
-                        Effect = "Allow",
-                        Principal = "*",
-                        Action = "s3:GetObject",
-                        Resource = $"arn:aws:s3:::{_normalizedBucketName}/*"
-                    }
-                }
-            });
-
-            await _s3Client.PutBucketPolicyAsync(new PutBucketPolicyRequest
-            {
-                BucketName = _normalizedBucketName,
-                Policy = policyJson
-            }, cancellationToken);
+            _logger.LogWarning(
+                "Object storage bucket {BucketName} is configured as public. This is not recommended for production.",
+                _normalizedBucketName);
+            return;
         }
+
+        await EnsureBucketIsPrivateAsync(cancellationToken);
     }
 
     public async Task<StoredObject> UploadAsync(
@@ -95,7 +78,6 @@ public sealed class S3ObjectStorageService(
 
         return new StoredObject(
             normalizedKey,
-            BuildPublicObjectUrl(normalizedKey),
             contentType,
             sizeBytes);
     }
@@ -123,27 +105,65 @@ public sealed class S3ObjectStorageService(
         }
     }
 
-    private string BuildPublicObjectUrl(string key)
+    public Task<SignedObjectUrl> GetReadUrlAsync(string key, TimeSpan ttl, CancellationToken cancellationToken)
     {
-        var encodedKey = string.Join('/',
-            key.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                .Select(Uri.EscapeDataString));
+        cancellationToken.ThrowIfCancellationRequested();
 
-        if (!string.IsNullOrWhiteSpace(_normalizedPublicBaseUrl))
+        var normalizedKey = key.Trim('/');
+        if (string.IsNullOrWhiteSpace(normalizedKey))
         {
-            return $"{_normalizedPublicBaseUrl}/{_normalizedBucketName}/{encodedKey}";
+            throw new ArgumentException("Object key cannot be empty.", nameof(key));
         }
 
-        return $"https://{_normalizedBucketName}.s3.{_options.Region}.amazonaws.com/{encodedKey}";
+        if (ttl <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(ttl), "Signed URL TTL must be greater than zero.");
+        }
+
+        var expiresAtUtc = DateTime.UtcNow.Add(ttl);
+        var url = _s3Client.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _normalizedBucketName,
+            Key = normalizedKey,
+            Verb = HttpVerb.GET,
+            Expires = expiresAtUtc
+        });
+
+        return Task.FromResult(new SignedObjectUrl(normalizedKey, url, expiresAtUtc));
     }
 
-    private static string? NormalizeUrl(string? value)
+    private async Task EnsureBucketIsPrivateAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        try
         {
-            return null;
+            await _s3Client.DeleteBucketPolicyAsync(
+                new DeleteBucketPolicyRequest { BucketName = _normalizedBucketName },
+                cancellationToken);
+        }
+        catch (AmazonS3Exception ex) when (ex.ErrorCode is "NoSuchBucketPolicy" or "NoSuchBucket")
+        {
+            // Bucket has no policy yet or does not exist (handled earlier).
         }
 
-        return value.Trim().TrimEnd('/');
+        try
+        {
+            await _s3Client.PutPublicAccessBlockAsync(new PutPublicAccessBlockRequest
+            {
+                BucketName = _normalizedBucketName,
+                PublicAccessBlockConfiguration = new PublicAccessBlockConfiguration
+                {
+                    BlockPublicAcls = true,
+                    IgnorePublicAcls = true,
+                    BlockPublicPolicy = true,
+                    RestrictPublicBuckets = true
+                }
+            }, cancellationToken);
+        }
+        catch (AmazonS3Exception ex) when (ex.ErrorCode is "NotImplemented" or "UnsupportedOperation")
+        {
+            // Some S3-compatible providers (or configurations) may not support PublicAccessBlock.
+            _logger.LogInformation(
+                "PublicAccessBlock is not supported by object storage provider. Bucket policy was still reset.");
+        }
     }
 }

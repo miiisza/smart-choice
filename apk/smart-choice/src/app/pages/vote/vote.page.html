@@ -62,7 +62,11 @@
         [class.selected]="selectedPhotoId === option.pollPhotoId"
         (click)="selectPhoto(option.pollPhotoId)"
       >
-        <img [src]="option.photoUrl" alt="Opcja ankiety" />
+        <img
+          [src]="resolveOptionImageUrl(option)"
+          alt="Opcja ankiety"
+          (error)="onOptionImageError()"
+        />
         <div class="option-overlay">
           <ion-badge [color]="selectedPhotoId === option.pollPhotoId ? 'success' : 'medium'">
             {{ selectedPhotoId === option.pollPhotoId ? 'Wybrano' : 'Wybierz' }}
@@ -71,8 +75,8 @@
       </button>
     </div>
 
-    <ion-item lines="none" color="warning" *ngIf="!authSessionService.hasToken()">
-      <ion-label>Brak tokenu do głosowania. Otwórz link invite ponownie.</ion-label>
+    <ion-item lines="none" color="warning" *ngIf="!authSessionService.canVoteOnPoll(pollId)">
+      <ion-label>Brak tokenu do głosowania dla tej ankiety. Otwórz link invite ponownie.</ion-label>
     </ion-item>
 
     <ion-item lines="none" color="danger" *ngIf="voteError">

@@ -7,4 +7,8 @@ public sealed class IssueGuestTokenRequest
     [Required]
     [StringLength(64, MinimumLength = 3)]
     public string InviteCode { get; init; } = string.Empty;
+
+    [Required]
+    [Range(1, long.MaxValue)]
+    public long PollId { get; init; }
 }

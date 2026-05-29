@@ -90,8 +90,6 @@ public sealed class Poll
     }
 
     public PollPhoto AddUploadedPhoto(
-        string photoUrl,
-        string thumbnailUrl,
         string storageKey,
         string thumbnailStorageKey,
         string contentType,
@@ -114,8 +112,6 @@ public sealed class Poll
         var displayOrder = _photos.Count + 1;
         var photo = PollPhoto.CreateUploadedForPoll(
             this,
-            photoUrl,
-            thumbnailUrl,
             storageKey,
             thumbnailStorageKey,
             contentType,

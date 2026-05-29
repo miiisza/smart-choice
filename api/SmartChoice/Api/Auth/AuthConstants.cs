@@ -11,6 +11,7 @@ public static class AuthClaimTypes
     public const string TokenType = "token_type";
     public const string GuestTokenId = "guest_token_id";
     public const string InviteId = "invite_id";
+    public const string PollId = "poll_id";
 }
 
 public static class AuthActorTypes

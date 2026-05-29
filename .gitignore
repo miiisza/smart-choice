@@ -1,6 +1,7 @@
 api/SmartChoice/appsettings.json
 api/SmartChoice/bin/
 api/SmartChoice/obj/
+api/SmartChoice/App_Data/
 api/SmartChoice/.idea/
 api/.idea/
 

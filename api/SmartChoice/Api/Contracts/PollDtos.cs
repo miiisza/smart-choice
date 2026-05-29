@@ -6,6 +6,8 @@ public sealed record PollPhotoDto(
     long Id,
     string PhotoUrl,
     string? ThumbnailUrl,
+    string DisplayUrl,
+    string? ThumbUrl,
     byte DisplayOrder);
 
 public sealed record PollDto(
@@ -51,6 +53,9 @@ public sealed record VoteDto(
 public sealed record PollResultOptionDto(
     long PollPhotoId,
     string PhotoUrl,
+    string? ThumbnailUrl,
+    string DisplayUrl,
+    string? ThumbUrl,
     byte DisplayOrder,
     int VoteCount,
     decimal Percentage);
@@ -58,6 +63,9 @@ public sealed record PollResultOptionDto(
 public sealed record PollWinnerDto(
     long PollPhotoId,
     string PhotoUrl,
+    string? ThumbnailUrl,
+    string DisplayUrl,
+    string? ThumbUrl,
     int VoteCount,
     decimal Percentage);
 

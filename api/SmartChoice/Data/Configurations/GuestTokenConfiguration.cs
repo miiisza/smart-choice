@@ -24,6 +24,10 @@ public sealed class GuestTokenConfiguration : IEntityTypeConfiguration<GuestToke
         builder.Property(x => x.InviteId)
             .HasColumnName("invite_id");
 
+        builder.Property(x => x.PollId)
+            .HasColumnName("poll_id")
+            .IsRequired();
+
         builder.Property(x => x.ExpiresAt)
             .HasColumnName("expires_at")
             .HasColumnType("datetime(6)");
@@ -47,9 +51,20 @@ public sealed class GuestTokenConfiguration : IEntityTypeConfiguration<GuestToke
             .HasForeignKey(x => x.InviteId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.HasOne(x => x.Poll)
+            .WithMany()
+            .HasForeignKey(x => x.PollId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasIndex(x => x.TokenHash)
             .IsUnique()
             .HasDatabaseName("ux_guest_tokens_token_hash");
+
+        builder.HasIndex(x => x.PollId)
+            .HasDatabaseName("ix_guest_tokens_poll_id");
+
+        builder.HasIndex(x => new { x.PollId, x.IsRevoked, x.ExpiresAt })
+            .HasDatabaseName("ix_guest_tokens_poll_revoked_expires_at");
 
         builder.HasIndex(x => new { x.IsRevoked, x.ExpiresAt })
             .HasDatabaseName("ix_guest_tokens_revoked_expires_at");

@@ -35,7 +35,7 @@ public sealed class PollConfiguration : IEntityTypeConfiguration<Poll>
         builder.Property(x => x.Status)
             .HasColumnName("status")
             .HasConversion<byte>()
-            .HasDefaultValue(PollStatus.Open)
+            .HasDefaultValue(PollStatus.Draft)
             .IsRequired();
 
         builder.Property(x => x.Latitude)

@@ -70,7 +70,7 @@ public sealed class JwtTokenService
             RefreshTokenExpiresAt: refreshExpiresAt);
     }
 
-    public string CreateGuestToken(long guestTokenId, long inviteId, string guestTokenJti, DateTime expiresAtUtc)
+    public string CreateGuestToken(long guestTokenId, long inviteId, long pollId, string guestTokenJti, DateTime expiresAtUtc)
     {
         var claims = new List<Claim>
         {
@@ -79,6 +79,7 @@ public sealed class JwtTokenService
             new(AuthClaimTypes.TokenType, AuthTokenTypes.GuestAccess),
             new(AuthClaimTypes.GuestTokenId, guestTokenId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
             new(AuthClaimTypes.InviteId, inviteId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            new(AuthClaimTypes.PollId, pollId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
             new(JwtRegisteredClaimNames.Jti, guestTokenJti)
         };
 

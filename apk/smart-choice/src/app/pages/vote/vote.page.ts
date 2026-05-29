@@ -25,12 +25,14 @@ export class VotePage implements OnInit, OnDestroy {
   isLoading = true;
   loadError: string | null = null;
   options: PollResultOptionDto[] = [];
+  isRefreshingImages = false;
 
   selectedPhotoId: number | null = null;
   isSubmittingVote = false;
   voteError: string | null = null;
 
   private routeSubscription?: Subscription;
+  private hasRefetchedAfterImageError = false;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -64,7 +66,7 @@ export class VotePage implements OnInit, OnDestroy {
       !this.loadError &&
       this.options.length > 0 &&
       this.selectedPhotoId !== null &&
-      this.authSessionService.hasToken()
+      this.authSessionService.canVoteOnPoll(this.pollId)
     );
   }
 
@@ -82,7 +84,7 @@ export class VotePage implements OnInit, OnDestroy {
       return;
     }
 
-    await this.ensureInviteToken(this.inviteCode);
+    await this.ensureInviteToken(this.inviteCode, this.pollId);
   }
 
   async retryLoadPoll(): Promise<void> {
@@ -90,7 +92,26 @@ export class VotePage implements OnInit, OnDestroy {
       return;
     }
 
+    this.hasRefetchedAfterImageError = false;
     await this.loadPollOptions(this.pollId);
+  }
+
+  resolveOptionImageUrl(option: PollResultOptionDto): string {
+    return option.displayUrl || option.photoUrl;
+  }
+
+  async onOptionImageError(): Promise<void> {
+    if (this.pollId <= 0 || this.isLoading || this.isRefreshingImages || this.hasRefetchedAfterImageError) {
+      return;
+    }
+
+    this.hasRefetchedAfterImageError = true;
+    this.isRefreshingImages = true;
+    try {
+      await this.loadPollOptions(this.pollId, true);
+    } finally {
+      this.isRefreshingImages = false;
+    }
   }
 
   async confirmVote(): Promise<void> {
@@ -126,6 +147,7 @@ export class VotePage implements OnInit, OnDestroy {
     this.selectedPhotoId = null;
     this.voteError = null;
     this.authError = null;
+    this.hasRefetchedAfterImageError = false;
 
     if (!Number.isInteger(pollId) || pollId <= 0) {
       this.isLoading = false;
@@ -135,18 +157,18 @@ export class VotePage implements OnInit, OnDestroy {
     }
 
     if (inviteCode) {
-      await this.ensureInviteToken(inviteCode);
+      await this.ensureInviteToken(inviteCode, pollId);
     }
 
     await this.loadPollOptions(pollId);
   }
 
-  private async ensureInviteToken(inviteCode: string): Promise<void> {
+  private async ensureInviteToken(inviteCode: string, pollId: number): Promise<void> {
     this.isAuthLoading = true;
     this.authError = null;
 
     try {
-      const tokenResponse = await firstValueFrom(this.authApiService.issueGuestToken(inviteCode));
+      const tokenResponse = await firstValueFrom(this.authApiService.issueGuestToken(inviteCode, pollId));
       this.authSessionService.setGuestSession(tokenResponse);
     } catch (error: unknown) {
       this.authError = this.apiErrorService.toMessage(
@@ -158,8 +180,10 @@ export class VotePage implements OnInit, OnDestroy {
     }
   }
 
-  private async loadPollOptions(pollId: number): Promise<void> {
-    this.isLoading = true;
+  private async loadPollOptions(pollId: number, silentRefresh: boolean = false): Promise<void> {
+    if (!silentRefresh) {
+      this.isLoading = true;
+    }
     this.loadError = null;
 
     try {
@@ -172,7 +196,9 @@ export class VotePage implements OnInit, OnDestroy {
       );
       this.options = [];
     } finally {
-      this.isLoading = false;
+      if (!silentRefresh) {
+        this.isLoading = false;
+      }
     }
   }
 

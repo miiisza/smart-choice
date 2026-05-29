@@ -7,12 +7,14 @@ public sealed class GuestToken
     public long Id { get; private set; }
     public string TokenHash { get; private set; } = string.Empty;
     public long? InviteId { get; private set; }
+    public long PollId { get; private set; }
     public DateTime? ExpiresAt { get; private set; }
     public bool IsRevoked { get; private set; }
     public DateTime CreatedAt { get; private set; } = DateTime.UtcNow;
     public DateTime? LastUsedAt { get; private set; }
 
     public Invite? Invite { get; private set; }
+    public Poll? Poll { get; private set; }
     public ICollection<Vote> Votes { get; } = new List<Vote>();
     public ICollection<Report> ReportsFiled { get; } = new List<Report>();
 
@@ -20,11 +22,16 @@ public sealed class GuestToken
     {
     }
 
-    public GuestToken(string tokenHash, long? inviteId, DateTime? expiresAt)
+    public GuestToken(string tokenHash, long? inviteId, long pollId, DateTime? expiresAt)
     {
         if (string.IsNullOrWhiteSpace(tokenHash))
         {
             throw new DomainValidationException("TokenHash is required.");
+        }
+
+        if (pollId <= 0)
+        {
+            throw new DomainValidationException("PollId must be greater than zero.");
         }
 
         if (expiresAt.HasValue && expiresAt.Value <= DateTime.UtcNow)
@@ -34,6 +41,7 @@ public sealed class GuestToken
 
         TokenHash = tokenHash.Trim();
         InviteId = inviteId;
+        PollId = pollId;
         ExpiresAt = expiresAt;
         IsRevoked = false;
         CreatedAt = DateTime.UtcNow;

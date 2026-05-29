@@ -18,6 +18,7 @@ export interface AuthTokenResponse {
 export interface GuestTokenResponse {
   guestToken: string;
   expiresAt: string;
+  pollId: number;
   tokenType: string;
 }
 
@@ -25,6 +26,8 @@ export interface PollPhotoDto {
   id: number;
   photoUrl: string;
   thumbnailUrl: string | null;
+  displayUrl: string;
+  thumbUrl: string | null;
   displayOrder: number;
 }
 
@@ -70,6 +73,9 @@ export interface VoteDto {
 export interface PollResultOptionDto {
   pollPhotoId: number;
   photoUrl: string;
+  thumbnailUrl: string | null;
+  displayUrl: string;
+  thumbUrl: string | null;
   displayOrder: number;
   voteCount: number;
   percentage: number;
@@ -78,6 +84,9 @@ export interface PollResultOptionDto {
 export interface PollWinnerDto {
   pollPhotoId: number;
   photoUrl: string;
+  thumbnailUrl: string | null;
+  displayUrl: string;
+  thumbUrl: string | null;
   voteCount: number;
   percentage: number;
 }

@@ -66,7 +66,14 @@ Oczekiwane:
 
 ## 4) Vote duplicate block -> 201, potem 409
 
-1. Zaloguj drugi raz jako inny user (lub użyj tokena guest z `/api/auth/guest`) i zapisz `VOTER_TOKEN`.
+1. Zaloguj drugi raz jako inny user albo pobierz token guest dla `OPENABLE_POLL_ID` i zapisz `VOTER_TOKEN`:
+
+```bash
+curl -s -X POST http://localhost:5148/api/auth/guest \
+  -H 'Content-Type: application/json' \
+  -d '{"inviteCode":"DEV2026","pollId":<OPENABLE_POLL_ID>}'
+```
+
 2. Pobierz `pollPhotoId` z opublikowanego polla (`OPENABLE_POLL_ID`) przez feed:
 
 ```bash
@@ -135,7 +142,7 @@ curl -i -X POST http://localhost:5148/api/polls/<UPLOAD_POLL_ID>/photos \
 
 Oczekiwane:
 - `201 Created` dla obu requestów
-- body zawiera `photoUrl`, `thumbnailUrl`, `displayOrder`
+- body zawiera signed URL-e: `displayUrl`, `thumbUrl` (oraz legacy `photoUrl`, `thumbnailUrl`)
 
 3. Opublikuj poll i spróbuj upload po publikacji:
 
@@ -162,3 +169,54 @@ curl -i -X POST http://localhost:5148/api/polls/<UPLOAD_POLL_ID>/photos \
 
 Oczekiwane:
 - `403 Forbidden` (`Only the poll author can upload photos for this poll.`)
+
+## 7) Rate limiting `POST /api/polls` (create) -> 429
+
+W 60 sekundach wywołaj endpoint więcej niż 5 razy tym samym tokenem:
+
+```bash
+for i in $(seq 1 6); do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:5148/api/polls \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer <USER_TOKEN>" \
+    -d "{\"question\":\"Load test $i\",\"photoUrls\":[\"https://img.example/a.jpg\",\"https://img.example/b.jpg\"],\"latitude\":52.2297,\"longitude\":21.0122,\"radiusMeters\":5000}"
+done
+```
+
+Oczekiwane:
+- pierwsze requesty: `201` / `400` (zależnie od payloadu)
+- po przekroczeniu limitu: `429 Too Many Requests` + `application/problem+json`
+
+## 8) Rate limiting `POST /api/votes` -> 429
+
+W 60 sekundach wywołaj `POST /api/votes` więcej niż 12 razy tym samym tokenem:
+
+```bash
+for i in $(seq 1 13); do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:5148/api/votes \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer <VOTER_TOKEN>" \
+    -d '{"pollId":<OPENABLE_POLL_ID>,"pollPhotoId":<POLL_PHOTO_ID>}'
+done
+```
+
+Oczekiwane:
+- po przekroczeniu limitu: `429 Too Many Requests`
+- body błędu jest w `ProblemDetails`
+
+## 9) ProblemDetails dla statusów domenowych
+
+Sprawdź przynajmniej 1 odpowiedź dla każdego statusu: `400`, `401`, `403`, `404`, `409`, `429`.
+
+Oczekiwane:
+- `Content-Type: application/problem+json`
+- spójne pola: `type`, `title`, `status`, `detail`, `instance`, `traceId`
+- dla `400` walidacyjnych obecne `errors`
+
+## 10) Logi kluczowych zdarzeń
+
+Podczas testów sprawdź log backendu (`docker logs`, konsola API):
+- issue guest token: sukces + przypadki odrzucone
+- create poll draft: sukces + walidacje/odrzucenia
+- cast vote: sukces + duplicate + odrzucone tokeny
+- rate limit reject (429)

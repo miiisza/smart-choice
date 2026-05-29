@@ -3,8 +3,7 @@
 Ta instrukcja uruchamia lokalnie cały stack na istniejących projektach:
 - backend `.NET 10` z endpointami healthcheck i CORS
 - frontend `Ionic`
-- `MySQL 8` w Docker Compose
-- opcjonalnie `MinIO` w Docker Compose
+- `MySQL 8` w Docker Compose (+ MinIO jako opcjonalna usługa legacy)
 
 ## 1) Wymagane zmienne środowiskowe
 
@@ -19,12 +18,16 @@ SMARTCHOICE_CORS_ORIGINS=http://localhost:8100,http://127.0.0.1:8100,http://loca
 Auth__Issuer=smart-choice-api
 Auth__Audience=smart-choice-client
 Auth__SigningKey=dev_only_change_me_to_a_long_32_char_secret_key
-ObjectStorage__BucketName=smart-choice-polls-dev
+PHOTO_STORAGE_PROVIDER=LocalDisk
+SIGNED_URL_TTL_MINUTES=5
+ObjectStorage__BucketName=matchme-photos
 ObjectStorage__Region=us-east-1
-ObjectStorage__AccessKey=minioadmin
-ObjectStorage__SecretKey=minioadmin
-ObjectStorage__ServiceUrl=http://localhost:9000
-ObjectStorage__PublicBaseUrl=http://localhost:9000
+ObjectStorage__AccessKey=
+ObjectStorage__SecretKey=
+ObjectStorage__ServiceUrl=
+ObjectStorage__PublicBaseUrl=http://localhost:5148
+ObjectStorage__LocalDiskRootPath=App_Data/object-storage
+ObjectStorage__LocalDiskSigningSecret=dev_local_storage_signing_secret_change_me
 ObjectStorage__ForcePathStyle=true
 ObjectStorage__ThumbnailWidth=480
 ObjectStorage__MaxUploadBytes=10485760
@@ -47,19 +50,16 @@ Uwaga dla emulatora Android: ustaw `IONIC_API_BASE_URL=http://10.0.2.2:5148`.
 
 Plik: `docker-compose.dev.yml`
 
-- MySQL 8 jest uruchamiany zawsze (`localhost:3306`)
-- MinIO jest opcjonalne przez profil `minio` (`localhost:9000`, panel `localhost:9001`)
+- MySQL 8 (`localhost:3306`)
+- MinIO (`localhost:9000`, `localhost:9001`) jest uruchamiany przez compose, ale przy `PHOTO_STORAGE_PROVIDER=LocalDisk` nie jest używany przez API.
 
 ## 3) Krok po kroku: jak odpalić wszystko lokalnie
 
 Z katalogu repo:
 
 ```bash
-# 1. Uruchom bazę (MySQL)
-docker compose -f docker-compose.dev.yml up -d mysql
-
-# 1a. (opcjonalnie) uruchom też MinIO
-docker compose -f docker-compose.dev.yml --profile minio up -d minio
+# 1. Uruchom usługi infra (MySQL + opcjonalnie MinIO)
+docker compose -f docker-compose.dev.yml up -d
 ```
 
 Uruchom backend:
@@ -75,16 +75,21 @@ export SMARTCHOICE_CORS_ORIGINS='http://localhost:8100,http://127.0.0.1:8100,htt
 export Auth__Issuer='smart-choice-api'
 export Auth__Audience='smart-choice-client'
 export Auth__SigningKey='dev_only_change_me_to_a_long_32_char_secret_key'
-export ObjectStorage__BucketName='smart-choice-polls-dev'
+export PHOTO_STORAGE_PROVIDER='LocalDisk'
+export SIGNED_URL_TTL_MINUTES=5
+export ObjectStorage__BucketName='matchme-photos'
 export ObjectStorage__Region='us-east-1'
-export ObjectStorage__AccessKey='minioadmin'
-export ObjectStorage__SecretKey='minioadmin'
-export ObjectStorage__ServiceUrl='http://localhost:9000'
-export ObjectStorage__PublicBaseUrl='http://localhost:9000'
+export ObjectStorage__AccessKey=''
+export ObjectStorage__SecretKey=''
+export ObjectStorage__ServiceUrl=''
+export ObjectStorage__PublicBaseUrl='http://localhost:5148'
+export ObjectStorage__LocalDiskRootPath='App_Data/object-storage'
+export ObjectStorage__LocalDiskSigningSecret='dev_local_storage_signing_secret_change_me'
 export ObjectStorage__ForcePathStyle=true
-export ObjectStorage__EnsureBucketExistsOnStartup=true
-export ObjectStorage__MakeBucketPublicOnStartup=true
+export ObjectStorage__EnsureBucketExistsOnStartup=false
+export ObjectStorage__MakeBucketPublicOnStartup=false
 export ObjectStorage__ThumbnailWidth=480
+export ObjectStorage__SignedUrlTtlMinutes=5
 export ObjectStorage__MaxUploadBytes=10485760
 export Database__AutoMigrateOnStartup=true
 export Database__SeedDevDataOnStartup=true
@@ -93,9 +98,9 @@ export Database__SeedDevDataOnStartup=true
 dotnet tool install --global dotnet-ef
 
 # aktualizacja schematu MySQL do najnowszej migracji
-dotnet ef database update --project SmartChoice/SmartChoice.csproj --startup-project SmartChoice/SmartChoice.csproj
+dotnet ef database update --project SmartChoice.csproj --startup-project SmartChoice.csproj
 
-dotnet run --project SmartChoice/SmartChoice.csproj
+dotnet run --project SmartChoice.csproj
 ```
 
 Sprawdź healthcheck backendu:

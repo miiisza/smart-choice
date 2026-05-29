@@ -22,8 +22,6 @@ services:
   minio:
     image: minio/minio:latest
     container_name: smart-choice-minio
-    profiles:
-      - minio
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -34,6 +32,23 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - smart_choice_minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: smart-choice-minio-init
+    restart: "no"
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-matchme-photos}
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD; do sleep 1; done &&
+      mc mb --ignore-existing local/$$S3_BUCKET &&
+      mc anonymous set none local/$$S3_BUCKET
+      "
 
 volumes:
   smart_choice_mysql_data:

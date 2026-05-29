@@ -53,6 +53,10 @@ namespace SmartChoice.Data.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("last_used_at");
 
+                    b.Property<long>("PollId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("poll_id");
+
                     b.Property<string>("TokenHash")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -67,6 +71,12 @@ namespace SmartChoice.Data.Migrations
 
                     b.HasIndex("InviteId", "CreatedAt")
                         .HasDatabaseName("ix_guest_tokens_invite_created_at");
+
+                    b.HasIndex("PollId")
+                        .HasDatabaseName("ix_guest_tokens_poll_id");
+
+                    b.HasIndex("PollId", "IsRevoked", "ExpiresAt")
+                        .HasDatabaseName("ix_guest_tokens_poll_revoked_expires_at");
 
                     b.HasIndex("IsRevoked", "ExpiresAt")
                         .HasDatabaseName("ix_guest_tokens_revoked_expires_at");
@@ -182,7 +192,7 @@ namespace SmartChoice.Data.Migrations
                     b.Property<byte>("Status")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint unsigned")
-                        .HasDefaultValue((byte)1)
+                        .HasDefaultValue((byte)0)
                         .HasColumnName("status");
 
                     b.Property<DateTime?>("UpdatedAt")
@@ -480,7 +490,15 @@ namespace SmartChoice.Data.Migrations
                         .HasForeignKey("InviteId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("SmartChoice.Domain.Entities.Poll", "Poll")
+                        .WithMany()
+                        .HasForeignKey("PollId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Invite");
+
+                    b.Navigation("Poll");
                 });
 
             modelBuilder.Entity("SmartChoice.Domain.Entities.Invite", b =>
