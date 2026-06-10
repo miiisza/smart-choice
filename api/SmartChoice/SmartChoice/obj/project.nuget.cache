@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "gsGK6cbJQJE=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Hyperbook\\projekty\\smart-choice\\API\\SmartChoice\\SmartChoice\\SmartChoice.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Hyperbook\\.nuget\\packages\\microsoft.aspnetcore.openapi\\10.0.8\\microsoft.aspnetcore.openapi.10.0.8.nupkg.sha512",
+    "C:\\Users\\Hyperbook\\.nuget\\packages\\microsoft.openapi\\2.0.0\\microsoft.openapi.2.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}
